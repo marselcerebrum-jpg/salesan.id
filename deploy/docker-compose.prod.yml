@@ -1,0 +1,98 @@
+# =============================================================================
+# salesan.id — production on one VPS.
+#
+#   backend  Go API + WhatsApp sessions      (internal port 8080)
+#   web      Next.js, self-contained build   (internal port 3000)
+#   caddy    reverse proxy + automatic HTTPS (ports 80/443, the only ones open)
+#
+# Database and media live in Supabase; nothing here stores customer data on
+# disk. Run from the repository root:
+#
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
+#
+# deploy/deploy.sh wraps that together with the migrations.
+# =============================================================================
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: salesan/backend:latest
+    container_name: salesan-backend
+    restart: unless-stopped
+    env_file:
+      - ../backend/.env
+    environment:
+      PORT: '8080'
+      APP_ENV: production
+      # The two values that differ between a laptop and the internet. Set once
+      # in deploy/.env; backend/.env keeps everything else.
+      PUBLIC_API_URL: https://${API_DOMAIN}
+      ALLOWED_ORIGINS: https://${APP_DOMAIN}
+    expose:
+      - '8080'
+    # Give whatsmeow time to close its sockets cleanly on shutdown.
+    stop_grace_period: 45s
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+    image: salesan/web:latest
+    container_name: salesan-web
+    restart: unless-stopped
+    environment:
+      # Read again at runtime by the server side of Next (middleware).
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+    expose:
+      - '3000'
+    depends_on:
+      backend:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: salesan-caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - backend
+
+volumes:
+  # Certificates. Losing this volume only means Caddy asks Let's Encrypt again.
+  caddy_data:
+  caddy_config:

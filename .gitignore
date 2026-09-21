@@ -1,0 +1,39 @@
+# --- secrets -----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- go ----------------------------------------------------------------------
+/backend/server
+/backend/server.exe
+# Media stored on disk when Supabase Storage is not configured. Customer photos
+# and documents — never commit them.
+/backend/.media/
+/backend/bin/
+*.test
+*.out
+
+# --- node / next -------------------------------------------------------------
+node_modules/
+/web/.next/
+# Output of `npm run build:check`. It is kept out of .next on purpose: a
+# production build writes manifests that a running `next dev` reads, and
+# overwriting them makes the dev server answer every page with a 500.
+/web/.next-check/
+/web/out/
+/web/build/
+/web/next-env.d.ts
+/web/.eslintcache
+*.tsbuildinfo
+
+# --- editors / os ------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- logs --------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-error.log*

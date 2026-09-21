@@ -1,0 +1,10 @@
+node_modules
+.next
+.next-check
+out
+build
+.env
+.env.*
+!.env.example
+*.log
+.eslintcache

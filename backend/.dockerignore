@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+server
+server.exe
+server.new.exe
+.media
+logs
+bin
+*.test
+*.out
+*.log

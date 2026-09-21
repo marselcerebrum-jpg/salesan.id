@@ -1,0 +1,6 @@
+# Shell scripts and the proxy config run on Linux; a CRLF checkout on Windows
+# would break the shebang line the moment they reach the VPS.
+*.sh text eol=lf
+Caddyfile text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf

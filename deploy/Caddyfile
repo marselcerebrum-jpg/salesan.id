@@ -1,0 +1,36 @@
+# Two hostnames, one proxy. Caddy obtains and renews the certificates itself
+# the first time each name is requested, so DNS for both has to point at this
+# server before `docker compose up`.
+#
+# WebSockets (/api/v1/ws) need nothing special: reverse_proxy upgrades them.
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
+
+	header {
+		# Never framed by another site, never sniffed into a different type.
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+	# Uploads: a broadcast document may be 100 MB. Caddy has no body limit of
+	# its own; the Go server enforces the per-kind ceilings.
+	reverse_proxy backend:8080 {
+		# Long polls and large uploads; the Go server's own timeout is 10 min.
+		transport http {
+			read_timeout 11m
+			write_timeout 11m
+		}
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
