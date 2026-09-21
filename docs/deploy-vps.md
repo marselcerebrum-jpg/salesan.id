@@ -106,6 +106,25 @@ database sebelum server baru start**, lalu restart. Sesi WhatsApp tersimpan di
 database, jadi restart tidak memutus tautan perangkat; backend menyambung ulang
 sendiri dalam beberapa detik.
 
+## Varian: VPS yang sudah punya nginx di port 80/443
+
+Inilah yang dipakai di `187.53.133.30` (`salesan.marseltech.cloud`), karena
+nginx di host sudah melayani `app.marseltech.cloud`. Caddy tidak dijalankan;
+container diekspos hanya ke `127.0.0.1` (`3180` web, `8180` backend) dan nginx
+yang mem-proxy. Sekali saja di VPS:
+
+```bash
+touch deploy/USE_NGINX                       # deploy.sh lalu memakai docker-compose.nginx.yml
+cp deploy/nginx-site.conf /etc/nginx/sites-available/salesan-id
+ln -s /etc/nginx/sites-available/salesan-id /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d salesan.marseltech.cloud -d api.salesan.marseltech.cloud --redirect
+```
+
+Sertifikat diperpanjang otomatis oleh timer certbot yang sudah ada. Deploy
+berikutnya tetap `bash deploy/deploy.sh`; site nginx tidak perlu disentuh lagi.
+Lokasi kode di VPS: `/opt/salesan/app`.
+
 ## Perintah harian
 
 ```bash
@@ -114,7 +133,7 @@ $C ps                       # status
 $C logs -f backend          # log backend (Ctrl+C untuk keluar)
 $C logs -f web              # log frontend
 $C restart backend          # restart satu container
-$C run --rm --no-deps backend /app/migrate -status   # migrasi mana yang sudah jalan
+$C run --rm --no-deps --entrypoint /app/migrate backend -status   # migrasi mana yang sudah jalan
 $C down                     # matikan semuanya (sertifikat tetap tersimpan)
 ```
 

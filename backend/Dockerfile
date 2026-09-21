@@ -26,7 +26,7 @@ RUN apk add --no-cache ca-certificates tzdata \
 WORKDIR /app
 COPY --from=builder /out/server /app/server
 # Migrations are run on purpose, before a new server starts, never by the
-# server itself: `docker compose run --rm backend /app/migrate`.
+# server itself: `docker compose run --rm --entrypoint /app/migrate backend`.
 COPY --from=builder /out/migrate /app/migrate
 COPY --from=builder /src/migrations /app/migrations
 

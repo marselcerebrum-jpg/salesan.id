@@ -1,0 +1,26 @@
+# =============================================================================
+# Override for a VPS that already runs nginx on ports 80/443.
+#
+# Caddy is left out and the two containers are published on localhost only;
+# the host's nginx proxies to them and certbot issues the certificates. Use it
+# together with the main file:
+#
+#   docker compose -f deploy/docker-compose.prod.yml -f deploy/docker-compose.nginx.yml \
+#                  --env-file deploy/.env up -d
+#
+# deploy/deploy.sh picks this file up automatically when deploy/USE_NGINX exists.
+# The matching nginx site is deploy/nginx-site.conf.
+# =============================================================================
+
+services:
+  backend:
+    ports:
+      - '127.0.0.1:8180:8080'
+
+  web:
+    ports:
+      - '127.0.0.1:3180:3000'
+
+  caddy:
+    # A profile nothing enables: the service stays defined but never starts.
+    profiles: ['caddy']

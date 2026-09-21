@@ -11,7 +11,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-COMPOSE=(docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env)
+COMPOSE=(docker compose -f deploy/docker-compose.prod.yml)
+# A VPS whose nginx already owns 80/443: skip Caddy, publish on localhost only.
+# The marker file is created once, by hand, on that server.
+if [[ -f deploy/USE_NGINX ]]; then
+  COMPOSE+=(-f deploy/docker-compose.nginx.yml)
+fi
+COMPOSE+=(--env-file deploy/.env)
 
 for f in deploy/.env backend/.env; do
   if [[ ! -f "$f" ]]; then
@@ -29,7 +35,9 @@ echo "== build image"
 "${COMPOSE[@]}" build --pull
 
 echo "== migrasi database"
-"${COMPOSE[@]}" run --rm --no-deps backend /app/migrate
+# --entrypoint, because the image's entrypoint is the server: without it the
+# path is handed to /app/server as an argument and a second server starts.
+"${COMPOSE[@]}" run --rm --no-deps --entrypoint /app/migrate backend
 
 echo "== start / restart"
 "${COMPOSE[@]}" up -d --remove-orphans
@@ -40,4 +48,4 @@ docker image prune -f >/dev/null
 echo
 "${COMPOSE[@]}" ps
 echo
-echo "Cek log:   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env logs -f backend"
+echo "Cek log:   ${COMPOSE[*]} logs -f backend"
