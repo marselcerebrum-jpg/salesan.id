@@ -173,7 +173,7 @@ VPS dari paket Docker resmi Supabase di `/opt/supabase` (11 container, jaringan
   `/storage/v1/…`. nginx membagi berdasarkan jalur; lihat `deploy/nginx-site.conf`.
 - Backend mencapai Postgres lewat jaringan Docker sebagai `db:5432`
   (`docker-compose.nginx.yml` menggabungkan container ke `supabase_default`).
-- **Studio** (dashboard tabel) sengaja tidak dibuka ke internet. Dari laptop:
+- **Studio** (dashboard tabel) ada di `https://api.salesan.marseltech.cloud/`, dilindungi basic auth (user `salesan`, password: `sh /opt/supabase/run.sh secrets` di VPS). Alternatif tanpa internet:
   `ssh -L 8000:127.0.0.1:8000 root@187.53.133.30` lalu buka
   `http://localhost:8000` (user `salesan`, password: `sh /opt/supabase/run.sh secrets`
   di VPS).
