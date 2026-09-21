@@ -10,12 +10,18 @@
 #
 # deploy/deploy.sh picks this file up automatically when deploy/USE_NGINX exists.
 # The matching nginx site is deploy/nginx-site.conf.
+#
+# The containers also join the self-hosted Supabase network, so the backend
+# reaches Postgres as `db:5432` without that port ever leaving the machine.
 # =============================================================================
 
 services:
   backend:
     ports:
       - '127.0.0.1:8180:8080'
+    networks:
+      - default
+      - supabase
 
   web:
     ports:
@@ -24,3 +30,8 @@ services:
   caddy:
     # A profile nothing enables: the service stays defined but never starts.
     profiles: ['caddy']
+
+networks:
+  supabase:
+    external: true
+    name: supabase_default

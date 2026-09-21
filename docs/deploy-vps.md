@@ -160,3 +160,26 @@ $C down                     # matikan semuanya (sertifikat tetap tersimpan)
   Caddy dengan HTTPS.
 - **Tidak ada auto-deploy dari Git.** Deploy terjadi ketika Anda menjalankan
   `deploy.sh`, sehingga selalu jelas kapan versi baru naik.
+
+## Supabase self-hosted di VPS (dipakai sejak 21 Sep 2026)
+
+Database, Auth, dan Storage tidak lagi di Supabase cloud; semuanya berjalan di
+VPS dari paket Docker resmi Supabase di `/opt/supabase` (11 container, jaringan
+`supabase_default`). Semua portnya diikat ke `127.0.0.1` (`deploy`-nya sendiri:
+`docker-compose.bind.yml`); yang masuk dari internet hanya lewat nginx.
+
+- API Supabase (auth, storage, rest, realtime) **berbagi hostname dengan
+  backend**: `https://api.salesan.marseltech.cloud/auth/v1/…`,
+  `/storage/v1/…`. nginx membagi berdasarkan jalur; lihat `deploy/nginx-site.conf`.
+- Backend mencapai Postgres lewat jaringan Docker sebagai `db:5432`
+  (`docker-compose.nginx.yml` menggabungkan container ke `supabase_default`).
+- **Studio** (dashboard tabel) sengaja tidak dibuka ke internet. Dari laptop:
+  `ssh -L 8000:127.0.0.1:8000 root@187.53.133.30` lalu buka
+  `http://localhost:8000` (user `salesan`, password: `sh /opt/supabase/run.sh secrets`
+  di VPS).
+- **Backup**: `deploy/backup-db.sh` lewat cron tiap 02:30 ke
+  `/opt/salesan/backups/` (14 hari). Backup ini hanya ada di VPS.
+- Mengelola stack: `cd /opt/supabase && sh run.sh status|logs|restart`.
+- Skrip pemindahan (dump cloud → restore → salin media → ganti .env) ada di
+  `/opt/salesan/migrate/` di VPS: `cutover.sh`, `restore-db.sh`, `copy-media.sh`.
+  Salinan `.env` cloud disimpan sebagai `*.cloud.bak` di folder masing-masing.
