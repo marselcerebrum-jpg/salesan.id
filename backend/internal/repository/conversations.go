@@ -89,7 +89,7 @@ func (r *Repo) ListConversations(ctx context.Context, workspaceID uuid.UUID, f m
 	if f.Search != "" {
 		args = append(args, "%"+f.Search+"%")
 		where = append(where, fmt.Sprintf(
-			"(coalesce(c.name, '') ilike $%d or c.chat_jid ilike $%d or coalesce(c.last_message_preview, '') ilike $%d)",
+			"(coalesce(c.name, '') ilike $%d or c.chat_jid ilike $%d or coalesce(c.last_message_text, '') ilike $%d)",
 			len(args), len(args), len(args)))
 	}
 	if f.LabelID != nil {
