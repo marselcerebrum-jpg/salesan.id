@@ -46,7 +46,20 @@ func (r *Repo) UpsertContact(ctx context.Context, in UpsertContactInput) (uuid.U
 			return uuid.Nil, err
 		}
 		if found {
-			return id, r.enrichContact(ctx, id, in)
+			err := r.enrichContact(ctx, id, in)
+			if err == nil {
+				return id, nil
+			}
+			// The row we found is this person under one address, and the number
+			// we are filling in already belongs to another row: the same person
+			// under their other address. One of them was created before anyone
+			// knew the two were the same. Fold them together and carry on.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+				pgErr.ConstraintName == "uq_contacts_account_phone" {
+				return r.mergeByPhone(ctx, id, in)
+			}
+			return uuid.Nil, err
 		}
 
 		id, err = r.insertContact(ctx, in)
@@ -100,6 +113,45 @@ func (r *Repo) enrichContact(ctx context.Context, id uuid.UUID, in UpsertContact
 		 where id = $1`,
 		id, in.PhoneNumber, in.JID, in.Name, in.PushName, in.BusinessName, in.IsBusiness)
 	return err
+}
+
+// mergeByPhone folds the row we were about to write a number into together
+// with the row that already holds that number.
+//
+// Which one survives is not arbitrary: the row carrying the phone number is the
+// one every other part of the system can address, so it is kept and the other
+// is merged into it. Everything pointing at the loser is moved first; the
+// database function does that in one transaction.
+//
+// Without this the two rows stay apart forever. Every sync retries the same
+// fill, is refused by the same unique index, and skips the contact — which is
+// how a phone ended up with two entries for one person and neither of them
+// updating.
+func (r *Repo) mergeByPhone(
+	ctx context.Context, id uuid.UUID, in UpsertContactInput,
+) (uuid.UUID, error) {
+	var keep uuid.UUID
+	err := r.pool.QueryRow(ctx, `
+		select id from public.contacts
+		 where account_id = $1 and phone_number = $2 and id <> $3
+		 limit 1`, in.AccountID, in.PhoneNumber, id).Scan(&keep)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// It went away between the refusal and now. The next sync settles it.
+		return id, nil
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	if _, err := r.pool.Exec(ctx,
+		`select public.merge_contact_rows($1, $2)`, keep, id); err != nil {
+		return uuid.Nil, err
+	}
+	// The survivor still has to learn the name and the LID the caller brought.
+	if err := r.enrichContact(ctx, keep, in); err != nil {
+		return uuid.Nil, err
+	}
+	return keep, nil
 }
 
 func (r *Repo) insertContact(ctx context.Context, in UpsertContactInput) (uuid.UUID, error) {
