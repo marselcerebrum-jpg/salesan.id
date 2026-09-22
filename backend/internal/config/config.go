@@ -124,6 +124,18 @@ type Config struct {
 	// Each number still sends strictly in order and still waits out its own
 	// delay profile; this only decides how many of them may be mid-send at once.
 	CampaignSendConcurrency int
+	// CampaignStoryConcurrency caps how many Story publications are being
+	// pushed to WhatsApp at the same instant, across every campaign in this
+	// process.
+	//
+	// A Story is not one send. WhatsApp addresses a status to every contact in
+	// the number's address book, and whatsmeow encrypts the key for each of
+	// their devices one by one: a number with twenty thousand saved contacts
+	// takes ten to thirteen minutes of CPU per Story. Running the numbers of one
+	// campaign one after another made a ten-number Story take two hours, while
+	// running them all at once would pin every core and stall the inbox. Three
+	// is the middle: a four-core server keeps one core for everything else.
+	CampaignStoryConcurrency int
 	// CampaignMediaMaxBytes caps a media download. Defaults to WhatsApp's own
 	// video limit, which is the largest thing that could be sent anyway.
 	CampaignMediaMaxBytes int64
@@ -204,16 +216,17 @@ func Load() (*Config, error) {
 		FollowUpGap:              duration("FOLLOWUP_GAP", 6*time.Hour),
 		MetricsReconcileInterval: duration("METRICS_RECONCILE_INTERVAL", 15*time.Minute),
 
-		CampaignPollInterval:  duration("CAMPAIGN_POLL_INTERVAL", 5*time.Second),
-		CampaignLease:         duration("CAMPAIGN_LEASE", 10*time.Minute),
-		CampaignConcurrency:   integer("CAMPAIGN_CONCURRENCY", 4),
+		CampaignPollInterval: duration("CAMPAIGN_POLL_INTERVAL", 5*time.Second),
+		CampaignLease:        duration("CAMPAIGN_LEASE", 10*time.Minute),
+		CampaignConcurrency:  integer("CAMPAIGN_CONCURRENCY", 4),
 		// Six, against a repository pool of eight: a send is mostly waiting on
 		// WhatsApp rather than on Postgres, so six in flight leaves the API room
 		// to keep answering while a large broadcast runs.
-		CampaignSendConcurrency: integer("CAMPAIGN_SEND_CONCURRENCY", 6),
-		CampaignMediaMaxBytes: int64(integer("CAMPAIGN_MEDIA_MAX_BYTES", 64*1024*1024)),
-		CampaignMediaTimeout:  duration("CAMPAIGN_MEDIA_TIMEOUT", 2*time.Minute),
-		CampaignTempDir:       os.Getenv("CAMPAIGN_TEMP_DIR"),
+		CampaignSendConcurrency:  integer("CAMPAIGN_SEND_CONCURRENCY", 6),
+		CampaignStoryConcurrency: integer("CAMPAIGN_STORY_CONCURRENCY", 3),
+		CampaignMediaMaxBytes:    int64(integer("CAMPAIGN_MEDIA_MAX_BYTES", 64*1024*1024)),
+		CampaignMediaTimeout:     duration("CAMPAIGN_MEDIA_TIMEOUT", 2*time.Minute),
+		CampaignTempDir:          os.Getenv("CAMPAIGN_TEMP_DIR"),
 
 		OpenAIAPIKey:  env("OPENAI_API_KEY", ""),
 		OpenAIBaseURL: strings.TrimRight(env("OPENAI_BASE_URL", "https://api.openai.com"), "/"),

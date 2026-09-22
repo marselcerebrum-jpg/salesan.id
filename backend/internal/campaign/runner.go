@@ -70,6 +70,11 @@ type Runner struct {
 	// campaign and every number this process is running. See
 	// config.CampaignSendConcurrency for why it exists.
 	sendSlots chan struct{}
+	// storySlots bounds how many Story publications are being pushed at once.
+	// Separate from sendSlots because one Story holds its slot for minutes, not
+	// seconds, and sharing would let two Stories stall every broadcast. See
+	// config.CampaignStoryConcurrency.
+	storySlots chan struct{}
 
 	wake   chan struct{}
 	ctx    context.Context
@@ -92,6 +97,17 @@ func (r *Runner) acquireSend(ctx context.Context) bool {
 
 func (r *Runner) releaseSend() { <-r.sendSlots }
 
+func (r *Runner) acquireStory(ctx context.Context) bool {
+	select {
+	case r.storySlots <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (r *Runner) releaseStory() { <-r.storySlots }
+
 // New builds a Runner. Start must be called to make it do anything.
 func New(
 	cfg *config.Config,
@@ -105,18 +121,23 @@ func New(
 	if slots < 1 {
 		slots = 1
 	}
+	storySlots := cfg.CampaignStoryConcurrency
+	if storySlots < 1 {
+		storySlots = 1
+	}
 	return &Runner{
-		cfg:       cfg,
-		repo:      repo,
-		wa:        manager,
-		hub:       hub,
-		log:       log.With("component", "campaign"),
-		owner:     uuid.New(),
-		inFlight:  map[uuid.UUID]bool{},
-		sendSlots: make(chan struct{}, slots),
-		wake:      make(chan struct{}, 1),
-		ctx:       ctx,
-		cancel:    cancel,
+		cfg:        cfg,
+		repo:       repo,
+		wa:         manager,
+		hub:        hub,
+		log:        log.With("component", "campaign"),
+		owner:      uuid.New(),
+		inFlight:   map[uuid.UUID]bool{},
+		sendSlots:  make(chan struct{}, slots),
+		storySlots: make(chan struct{}, storySlots),
+		wake:       make(chan struct{}, 1),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -926,8 +947,28 @@ func (r *Runner) runStory(ctx context.Context, job repository.CampaignJob, fetch
 		if len(pubs) == 0 {
 			break
 		}
+		// The numbers of one Story go out side by side, each on its own
+		// socket, bounded process-wide by storySlots. They used to go one after
+		// another, and with ten minutes of encryption per number that made a
+		// ten-number Story a two-hour wait in which every number after the
+		// first read "pending" the whole time.
+		var wg sync.WaitGroup
 		for _, p := range pubs {
-			r.publishStory(ctx, job, p, fetched)
+			if !r.acquireStory(ctx) {
+				// Cancelled while queueing. Whatever was claimed and not
+				// started is left for the lease to expire and the next tick.
+				break
+			}
+			wg.Add(1)
+			go func(p repository.QueuedPublication) {
+				defer wg.Done()
+				defer r.releaseStory()
+				r.publishStory(ctx, job, p, fetched)
+			}(p)
+		}
+		wg.Wait()
+		if ctx.Err() != nil {
+			return
 		}
 	}
 
@@ -1036,7 +1077,14 @@ func (r *Runner) publishStory(
 		}
 	}
 
+	// Kept alive for as long as the push takes. A Story to twenty thousand
+	// contacts outlives a ten-minute lease, and a lease that ran out mid-push
+	// let the next pass claim the same publication again while this one was
+	// still encrypting it.
+	started := time.Now()
+	stopRenew := r.renewPublicationLease(ctx, p.ID)
 	res, sendErr := r.wa.PublishStory(ctx, p.AccountID, msg, waID)
+	stopRenew()
 
 	// The outcome is recorded on a context of its own.
 	//
@@ -1081,8 +1129,33 @@ func (r *Runner) publishStory(
 	// message id recorded on the publication above, not this.
 	r.recordOwnStory(outCtx, job, p, built.Body, waID, prepared, at)
 
-	log.Info("story published", "wa_message_id", waID)
+	log.Info("story published", "wa_message_id", waID, "took", time.Since(started).Round(time.Second))
 	r.publish(outCtx, job)
+}
+
+// renewPublicationLease keeps one publication's claim current while its push
+// is in progress. Same shape as renewLease, one row narrower.
+func (r *Runner) renewPublicationLease(ctx context.Context, publicationID uuid.UUID) func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(r.cfg.CampaignLease / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if err := r.repo.RenewStoryPublicationLease(c, publicationID, r.cfg.CampaignLease); err != nil {
+					r.log.Warn("renew story publication lease", "publication_id", publicationID, "err", err)
+				}
+				cancel()
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // recordOwnStory writes the published Story into this number's own Status
@@ -1140,8 +1213,8 @@ func (r *Runner) recordOwnStory(
 		Type:           msgType,
 		Body:           bodyPtr,
 		Caption:        captionPtr,
-		MediaMime: mime,
-		Status:    models.MessageStatusSent,
+		MediaMime:      mime,
+		Status:         models.MessageStatusSent,
 		// WhatsApp's own stamp for the publication, so the Status panel and the
 		// Story report agree on when it went out rather than differing by
 		// whatever the round trip took.

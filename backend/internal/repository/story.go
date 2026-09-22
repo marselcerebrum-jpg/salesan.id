@@ -120,6 +120,20 @@ func (r *Repo) StartStoryPublication(
 	return err
 }
 
+// RenewStoryPublicationLease extends the claim on a publication whose push is
+// still running, so ClaimStoryPublications does not hand it out a second time.
+// Only a row still being processed; one that has since settled keeps its
+// outcome.
+func (r *Repo) RenewStoryPublicationLease(
+	ctx context.Context, publicationID uuid.UUID, lease time.Duration,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		update public.story_publications
+		   set lease_expires_at = now() + make_interval(secs => $2)
+		 where id = $1 and status = 'processing'`, publicationID, lease.Seconds())
+	return err
+}
+
 // MarkStoryPublished records a successful publication.
 //
 // expires_at is stamped from the moment it actually went out, so "kedaluwarsa"
