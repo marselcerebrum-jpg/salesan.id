@@ -199,6 +199,7 @@ Yang baru, semuanya opsional:
 | `CAMPAIGN_POLL_INTERVAL` | `5s` | Jeda scheduler menanyakan pekerjaan |
 | `CAMPAIGN_LEASE` | `10m` | Lama klaim sebelum worker lain boleh mengambil |
 | `CAMPAIGN_CONCURRENCY` | `4` | Campaign paralel per proses |
+| `CAMPAIGN_STORY_CONCURRENCY` | `3` | Nomor yang menerbitkan Story bersamaan, seluruh proses |
 | `CAMPAIGN_MEDIA_MAX_BYTES` | `67108864` | Batas unduhan media |
 | `CAMPAIGN_MEDIA_TIMEOUT` | `2m` | Batas waktu unduhan |
 | `CAMPAIGN_TEMP_DIR` | sistem | Lokasi berkas sementara |
@@ -244,6 +245,26 @@ bekerja; `broadcast.go` menunjukkan whatsmeow sendiri yang menyusun daftar
 penerimanya lewat `getStatusBroadcastRecipients()` dari `GetStatusPrivacy()`.
 Artinya audiens Story ditentukan oleh pengaturan privasi di HP, bukan oleh
 aplikasi ini.
+
+**Satu Story memakan menit, bukan detik.** Dengan privasi "Kontak saya",
+audiensnya adalah semua kontak tersimpan nomor itu, dan whatsmeow mengenkripsi
+kunci Story untuk setiap perangkat mereka satu per satu, setiap kali terbit.
+Diukur di produksi: 10.000 kontak sekitar 6 menit, 22.000 kontak sekitar 12
+menit, satu inti CPU penuh selama itu. Worker menerbitkan nomor-nomor dalam satu
+campaign secara paralel (dibatasi `CAMPAIGN_STORY_CONCURRENCY`) dan memperpanjang
+lease publikasi selama proses berjalan, sehingga Story ke sepuluh nomor selesai
+dalam belasan menit, bukan dua jam. Restart backend di tengah proses membatalkan
+kiriman yang sedang berjalan; ia diulang setelah lease habis. Cara memperkecil
+biayanya ada di HP: daftar privasi Status "Hanya bagikan dengan…" mempersempit
+audiens, dan whatsmeow mengikutinya.
+
+**Komunitas dan grup khusus admin ditolak sebelum kirim.** Komunitas WhatsApp
+(induk grup) ikut muncul di `GetJoinedGroups` dengan alamat `@g.us`, dan grup
+bermode "hanya admin" tetap menganggap nomor kita anggota. Keduanya dijawab
+server dengan error 420 saat kirim. Keduanya disimpan dari info grup
+(`group_is_community`, `group_announce` bersama `self_is_admin`), pratinjau
+Broadcast melaporkannya sebagai masalah dengan alasan tertulis, dan error 420
+saat kirim dicatat final pada percobaan pertama.
 
 **Tidak ada API untuk membaca penonton Story.** Tidak ada padanan daftar penonton
 yang ditampilkan aplikasi HP. Satu-satunya sinyal nyata adalah `events.Receipt`
