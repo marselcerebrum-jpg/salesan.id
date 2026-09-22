@@ -3,6 +3,7 @@
 import clsx from 'clsx';
 import {
   ChevronDown,
+  Eye,
   ImageIcon,
   Loader2,
   MessagesSquare,
@@ -49,6 +50,7 @@ import type {
   Conversation,
   GroupMember,
   Message,
+  PresenceViewer,
   PrivateReplyTarget,
   QuickReply,
 } from '@/lib/types';
@@ -109,6 +111,11 @@ interface MessageThreadProps {
    * it, not part of sending it.
    */
   onPrivateReplySent: (target: PrivateReplyTarget) => void;
+  /**
+   * Colleagues who have this same thread open right now, on any browser using
+   * this number. Shown so two people do not answer the same customer at once.
+   */
+  viewers?: PresenceViewer[];
 }
 
 /** Right column of the inbox: header, scrolling thread, composer. */
@@ -132,6 +139,7 @@ export function MessageThread({
   unreadMark,
   mentionAnchor,
   ownJids,
+  viewers,
   onConversationChange,
   onPrivateReplySent,
 }: MessageThreadProps) {
@@ -509,6 +517,19 @@ export function MessageThread({
           <p className="truncate text-sm text-wa-text-2">
             {isGroup ? 'Grup' : (conversation.phone_number ?? jidToDisplay(conversation.chat_jid))}
           </p>
+          {/* Somebody else is in this thread. Named, not counted: the point
+              is to know whom to check with before typing. */}
+          {viewers && viewers.length > 0 ? (
+            <p
+              className="mt-0.5 flex items-center gap-1 truncate text-xs text-wa-accent"
+              title={`Sedang dibuka oleh ${viewers.map((v) => v.name).join(', ')}`}
+            >
+              <Eye className="size-3.5 shrink-0" aria-hidden />
+              <span className="truncate">
+                Sedang dibuka oleh {viewers.map((v) => v.name).join(', ')}
+              </span>
+            </p>
+          ) : null}
         </div>
 
         {/* Labels applied to this thread, shown but not edited here: the

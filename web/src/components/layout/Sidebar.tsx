@@ -25,8 +25,8 @@ import {
   Zap,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import useSWR from 'swr';
+import { usePathname } from 'next/navigation';
+import useSWR, { mutate } from 'swr';
 import type { ComponentType } from 'react';
 
 import { SalesanMark } from '@/components/ui/BrandLogo';
@@ -35,7 +35,14 @@ import { fetcher } from '@/lib/api';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme';
 import { initials } from '@/lib/format';
-import type { Account, User, Workspace } from '@/lib/types';
+import type { Account, Me } from '@/lib/types';
+
+/** What the sidebar calls each operational role. */
+const ROLE_LABEL: Record<string, string> = {
+  leader: 'Leader',
+  pic: 'PIC',
+  freelance: 'Freelance',
+};
 
 interface NavItem {
   label: string;
@@ -110,12 +117,11 @@ export function Sidebar({
   open,
   onClose,
 }: {
-  profile: { user: User; workspace: Workspace } | null;
+  profile: Me | null;
   open: boolean;
   onClose: () => void;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const { resolved, toggle } = useTheme();
 
   const { data } = useSWR<{ accounts: Account[] }>('/accounts', fetcher, {
@@ -134,9 +140,19 @@ export function Sidebar({
 
   async function signOut() {
     await getSupabaseBrowserClient().auth.signOut();
-    router.replace('/login');
-    router.refresh();
+    // Everything this tab fetched belonged to the person who just left:
+    // profile, inbox, Performa figures, PIC lists. SWR would otherwise hand the
+    // same cache to whoever signs in next, until each page happened to
+    // refetch. Clear it, then leave with a full reload so the realtime socket
+    // and every component's state go with it.
+    await mutate(() => true, undefined, { revalidate: false });
+    window.location.assign('/login');
   }
+
+  const role = profile?.scope?.role ?? '';
+  const roleLabel =
+    ROLE_LABEL[role] ??
+    (profile?.scope?.all ? 'Leader' : profile ? 'Belum diberi peran' : '');
 
   return (
     <>
@@ -251,8 +267,14 @@ export function Sidebar({
               <p className="truncate text-sm font-medium">
                 {profile?.user.full_name ?? profile?.user.email ?? 'Memuat…'}
               </p>
-              <p className="truncate text-2xs text-white/55 capitalize">
-                {profile?.user.role ?? 'admin'}
+              {/* The role this person works as, and the address they signed in
+                  with: together they say whose account this is, which is the
+                  question this card exists to answer. */}
+              <p
+                className="truncate text-2xs text-white/55"
+                title={profile ? `${roleLabel} · ${profile.user.email}` : undefined}
+              >
+                {profile ? `${roleLabel} · ${profile.user.email}` : ''}
               </p>
             </div>
             <button

@@ -7,7 +7,7 @@ import useSWR from 'swr';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { fetcher } from '@/lib/api';
 import { RealtimeProvider, useRealtimeStatus } from '@/lib/realtime';
-import type { User, Workspace } from '@/lib/types';
+import type { Me } from '@/lib/types';
 
 /**
  * Two-column application frame: fixed dark sidebar on the left, scrollable
@@ -23,7 +23,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { data: profile } = useSWR<{ user: User; workspace: Workspace }>('/me', fetcher);
+  const { data: profile } = useSWR<Me>('/me', fetcher);
 
   return (
     <div className="min-h-dvh bg-surface">

@@ -19,11 +19,18 @@ type Listener = (event: RealtimeEvent) => void;
 interface RealtimeContextValue {
   connected: boolean;
   subscribe: (listener: Listener) => () => void;
+  /**
+   * Sends one frame to the server. Dropped silently when the socket is not
+   * open: presence is the only thing that travels this way, and a caller that
+   * cares re-sends when `connected` flips back to true.
+   */
+  send: (frame: object) => void;
 }
 
 const RealtimeContext = createContext<RealtimeContextValue>({
   connected: false,
   subscribe: () => () => {},
+  send: () => {},
 });
 
 const MAX_BACKOFF_MS = 15_000;
@@ -146,7 +153,18 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const value = useMemo(() => ({ connected, subscribe }), [connected, subscribe]);
+  const send = useCallback((frame: object) => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify(frame));
+    } catch {
+      // A socket that is closing between the check and the send. The next
+      // reconnect re-announces presence anyway.
+    }
+  }, []);
+
+  const value = useMemo(() => ({ connected, subscribe, send }), [connected, subscribe, send]);
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }
@@ -154,6 +172,23 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 /** Reports whether the realtime socket is currently up. */
 export function useRealtimeStatus() {
   return useContext(RealtimeContext).connected;
+}
+
+/**
+ * Announces which conversation this browser has open, so colleagues on the
+ * same number see "sedang dibuka oleh". Re-sent on every reconnect, because
+ * the server forgets presence when a socket drops.
+ */
+export function usePresenceAnnounce(conversationId: string | null) {
+  const { send, connected } = useContext(RealtimeContext);
+
+  useEffect(() => {
+    if (!connected) return;
+    send({ type: 'presence.view', conversation_id: conversationId });
+    // Leaving the page, or switching away, is also worth announcing: without
+    // it the name would linger on the thread until the socket itself closed.
+    return () => send({ type: 'presence.view', conversation_id: null });
+  }, [conversationId, connected, send]);
 }
 
 /**

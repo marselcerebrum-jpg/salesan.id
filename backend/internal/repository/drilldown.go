@@ -384,11 +384,9 @@ func (r *Repo) LabelUsage(
 // UnattributedLabelEvents counts how many of the label changes in this period
 // came from a phone, where WhatsApp names nobody.
 //
-// They are counted in every figure — see labelActorWhere — because a label
-// change belongs to the account it happened on, phone or web alike. This number
-// exists so the interface can say how it arrived at the total, and so a reader
-// who finds the same change in two people's figures knows why: the change is
-// the number's, and WhatsApp does not say which hand made it.
+// Those are left out of a person's figures — see labelActorWhere — so this
+// number exists to say what the personal view is not showing, rather than let
+// an empty card imply nothing happened on the number.
 //
 // Zero when no person is selected, because then the question does not arise.
 func (r *Repo) UnattributedLabelEvents(

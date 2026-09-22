@@ -444,8 +444,21 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	// The operational role (Leader / PIC / Freelance) is what the person
+	// recognises as "their account"; the workspace role on the user row is a
+	// permission tier they never chose. Resolved here, once, from the same
+	// rule every scoped endpoint uses, so the sidebar and the data agree.
+	sc, err := s.repo.ResolveScope(r.Context(), user)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":      user,
 		"workspace": workspace,
+		"scope": map[string]any{
+			"role": sc.Role,
+			"all":  sc.All,
+		},
 	})
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowRight, Eye, EyeOff, Loader2, Lock, Mail } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Suspense, useState, type FormEvent } from 'react';
 
 import {
@@ -88,9 +88,11 @@ function BrandPanel() {
 /* --- form ----------------------------------------------------------------- */
 
 function LoginForm() {
-  const router = useRouter();
   const params = useSearchParams();
-  const next = params.get('next') ?? '/accounts';
+  // Only a path on this site: a full URL here would let a crafted link send
+  // somebody elsewhere after they typed their password.
+  const wanted = params.get('next') ?? '';
+  const next = wanted.startsWith('/') && !wanted.startsWith('//') ? wanted : '/accounts';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -107,8 +109,11 @@ function LoginForm() {
       const supabase = getSupabaseBrowserClient();
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      router.replace(next);
-      router.refresh();
+      // A full navigation, not a client-side route change. Anything the tab
+      // still holds from a previous sign-in (SWR cache, the realtime socket,
+      // component state) would otherwise be shown to this person as theirs
+      // until each piece happened to refresh.
+      window.location.assign(next);
     } catch (err) {
       setError(readable(err));
       setBusy(false);

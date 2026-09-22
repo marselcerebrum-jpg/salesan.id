@@ -100,19 +100,10 @@ func (r *Repo) ActivityFeed(
 		return ""
 	}
 
-	// The label history plays by labelActorWhere's rule instead: a change made
-	// on the phone carries no person, and it counts for the account rather than
-	// disappearing from the feed. Without this the label card could say two
-	// changes while the history under it showed none.
-	labelActor := func(col string) string {
-		if f.AdminID != nil {
-			return fmt.Sprintf(" and (%s = %s or %s is null)", col, q.add(*f.AdminID), col)
-		}
-		if !sc.All && sc.Role == models.RoleFreelance {
-			return fmt.Sprintf(" and (%s = %s or %s is null)", col, q.add(sc.UserID), col)
-		}
-		return actorFilter(col)
-	}
+	// The label history follows labelActorWhere: one person's feed holds the
+	// changes that person made. A change made on the phone names nobody, so it
+	// appears only in the account-wide feed, never under a person.
+	labelActor := actorFilter
 
 	accountFilter := func(col string) string {
 		if f.AccountID == nil {

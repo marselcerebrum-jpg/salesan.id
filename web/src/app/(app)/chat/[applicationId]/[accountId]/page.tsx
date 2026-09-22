@@ -60,7 +60,7 @@ import {
   unassignLabel,
 } from '@/lib/api';
 import { ACCOUNT_STATUS_LABEL, accountStatusTone, conversationTitle } from '@/lib/format';
-import { useRealtimeEvent } from '@/lib/realtime';
+import { usePresenceAnnounce, useRealtimeEvent } from '@/lib/realtime';
 import type {
   Account,
   Conversation,
@@ -70,10 +70,13 @@ import type {
   LabelsUpdatedPayload,
   LabelSyncState,
   LabelSyncStatePayload,
+  Me,
   Message,
   MessageHiddenPayload,
   MessageNewPayload,
   MessageStatusPayload,
+  PresenceViewer,
+  PresenceViewersPayload,
   PrivateReplyTarget,
   QuickReply,
 } from '@/lib/types';
@@ -249,6 +252,33 @@ function Inbox() {
   );
 
   const connected = account?.status === 'connected';
+
+  /* --- presence: who else has a chat open ---------------------------------- */
+
+  // Only while the Chat tab shows a thread. On Status or Saluran the thread is
+  // not on screen, so claiming to be "in" it would mislead a colleague.
+  usePresenceAnnounce(view === 'chat' ? selectedId : null);
+
+  const { data: me } = useSWR<Me>('/me', fetcher);
+  // conversation id -> people with it open, as the server last reported.
+  const [viewers, setViewers] = useState<Record<string, PresenceViewer[]>>({});
+  useRealtimeEvent<PresenceViewersPayload>('presence.viewers', (payload) => {
+    setViewers((prev) => {
+      const next = { ...prev };
+      if (payload.viewers.length === 0) delete next[payload.conversation_id];
+      else next[payload.conversation_id] = payload.viewers;
+      return next;
+    });
+  });
+  // Everyone but me: my own name on the thread I am reading says nothing.
+  const othersViewing = useMemo(() => {
+    const out: Record<string, PresenceViewer[]> = {};
+    for (const [id, list] of Object.entries(viewers)) {
+      const others = list.filter((v) => v.user_id !== me?.user.id);
+      if (others.length > 0) out[id] = others;
+    }
+    return out;
+  }, [viewers, me?.user.id]);
 
   /* --- status playback ----------------------------------------------------- */
 
@@ -942,6 +972,7 @@ function Inbox() {
             onDelete={handleDelete}
             onToggleLabel={handleToggleLabel}
             loading={listLoading}
+            viewers={othersViewing}
           />
         ) : view === 'status' ? (
           <StatusList accountId={accountId} selected={statusJID} onSelect={openStatus} />
@@ -1007,6 +1038,7 @@ function Inbox() {
           applicationId={applicationId}
           onConversationChange={handleConversationChange}
           onPrivateReplySent={handlePrivateReplySent}
+          viewers={selected ? othersViewing[selected.id] : undefined}
         />
         )}
       </section>
@@ -1044,8 +1076,9 @@ function Inbox() {
                 mentionAnchor={mentionAnchor}
                 ownJids={ownJids}
                 applicationId={applicationId}
-          onConversationChange={handleConversationChange}
-          onPrivateReplySent={handlePrivateReplySent}
+                onConversationChange={handleConversationChange}
+                onPrivateReplySent={handlePrivateReplySent}
+                viewers={othersViewing[selected.id]}
               />
             </div>
           </div>

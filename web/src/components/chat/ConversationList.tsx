@@ -5,6 +5,7 @@ import {
   AtSign,
   ChevronDown,
   Eraser,
+  Eye,
   MailQuestion,
   Search,
   Tag,
@@ -15,7 +16,7 @@ import { useState } from 'react';
 
 import { Chip } from '@/components/ui/Primitives';
 import { conversationTitle, formatChatTime, initials, previewText } from '@/lib/format';
-import type { Conversation, ConversationCounts, Label } from '@/lib/types';
+import type { Conversation, ConversationCounts, Label, PresenceViewer } from '@/lib/types';
 
 export interface InboxFilters {
   search: string;
@@ -46,6 +47,8 @@ interface ConversationListProps {
   onDelete: (conversation: Conversation, clearOnly: boolean) => void;
   onToggleLabel: (conversation: Conversation, labelId: string, attached: boolean) => void;
   loading: boolean;
+  /** conversation id -> colleagues who have that thread open right now. */
+  viewers?: Record<string, PresenceViewer[]>;
 }
 
 /**
@@ -196,6 +199,7 @@ export function ConversationList({
   onDelete,
   onToggleLabel,
   loading,
+  viewers,
 }: ConversationListProps) {
   const patch = (next: Partial<InboxFilters>) => onFiltersChange({ ...filters, ...next });
 
@@ -275,6 +279,7 @@ export function ConversationList({
                 onMarkUnread={onMarkUnread}
                 onDelete={onDelete}
                 onToggleLabel={onToggleLabel}
+                viewing={viewers?.[conv.id]}
               />
             ))}
           </ul>
@@ -414,6 +419,7 @@ function ConversationRow({
   onMarkUnread,
   onDelete,
   onToggleLabel,
+  viewing,
 }: {
   conversation: Conversation;
   selected: boolean;
@@ -422,10 +428,13 @@ function ConversationRow({
   onMarkUnread: (conversation: Conversation) => void;
   onDelete: (conversation: Conversation, clearOnly: boolean) => void;
   onToggleLabel: (conversation: Conversation, labelId: string, attached: boolean) => void;
+  /** Colleagues with this thread open, if any. */
+  viewing?: PresenceViewer[];
 }) {
   const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
   const title = conversationTitle(conversation);
   const isGroup = conversation.type === 'group';
+  const viewedBy = viewing && viewing.length > 0 ? viewing.map((v) => v.name).join(', ') : null;
 
   return (
     <li className="group relative">
@@ -450,13 +459,27 @@ function ConversationRow({
         <span className="min-w-0 flex-1 border-b border-wa-border pb-[10px]">
           <span className="flex items-baseline justify-between gap-2">
             <span className="truncate text-base text-wa-text">{title}</span>
-            <span
-              className={clsx(
-                'shrink-0 text-xs',
-                conversation.unread_count > 0 ? 'text-wa-badge' : 'text-wa-text-2',
-              )}
-            >
-              {formatChatTime(conversation.last_message_at)}
+            <span className="flex shrink-0 items-center gap-1.5">
+              {/* A colleague is in this chat. The eye alone is the signal; the
+                  name is one hover away, and the thread header spells it out. */}
+              {viewedBy ? (
+                <span
+                  className="inline-flex"
+                  role="img"
+                  aria-label={`Sedang dibuka oleh ${viewedBy}`}
+                  title={`Sedang dibuka oleh ${viewedBy}`}
+                >
+                  <Eye className="size-3.5 text-wa-accent" aria-hidden />
+                </span>
+              ) : null}
+              <span
+                className={clsx(
+                  'text-xs',
+                  conversation.unread_count > 0 ? 'text-wa-badge' : 'text-wa-text-2',
+                )}
+              >
+                {formatChatTime(conversation.last_message_at)}
+              </span>
             </span>
           </span>
 

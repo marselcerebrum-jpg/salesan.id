@@ -85,32 +85,23 @@ func scopeWhere(alias string, sc Scope, f models.AnalyticsFilter, tsCol string, 
 	return where
 }
 
-// labelActorWhere narrows the label history to one person, by the rule the
-// operator set: a label change counts as long as it happened on their account,
-// from the phone or from the web alike.
+// labelActorWhere narrows the label history to one person: the changes that
+// person made themselves, signed in on the web.
 //
-// A label change carries a person only when it was made on the web, where
-// somebody was signed in. One made on the phone carries none — WhatsApp does
-// not say who was holding it, and naming a guess would file one person's work
-// under another's name. Those used to be dropped from a person's figures
-// entirely, which meant a workspace that labels chats on the phone read "belum
-// ada perubahan label" on days when labels had been changed all along.
-//
-// So they are counted for the account instead of discarded. scopeWhere has
-// already restricted the rows to the accounts this reader may see, which is
-// what makes "made by this person, or by nobody we can name" mean "on this
-// person's numbers".
-//
-// The cost, stated rather than hidden: two people who share one number both see
-// the same phone change in their own figures. That is the honest shape of what
-// WhatsApp gives us — the change belongs to the number, not to a person — and
-// the label card says so under the figures.
+// A change made on the phone carries no person. WhatsApp does not say who was
+// holding it, and for a while those were counted in every person's figures on
+// the account, so that a number labelled from the phone did not read "belum
+// ada perubahan label". The operator ruled otherwise: a person's own figures
+// must show what that person did, and two people sharing one number must not
+// both be credited with the same phone change. Phone changes therefore stay in
+// the account and team totals (no admin filter) and are left out of anyone's
+// personal figures; UnattributedLabelEvents counts what was left out so the
+// card can say so.
 func labelActorWhere(alias string, f models.AnalyticsFilter, q *queryArgs) string {
 	if f.AdminID == nil {
 		return ""
 	}
-	return fmt.Sprintf(" and (%s.admin_id = %s or %s.admin_id is null)",
-		alias, q.add(*f.AdminID), alias)
+	return fmt.Sprintf(" and %s.admin_id = %s", alias, q.add(*f.AdminID))
 }
 
 // messageWhere is the same restriction for a message query, where the columns
@@ -562,10 +553,14 @@ func (r *Repo) collectLabels(
 	q2 := &queryArgs{}
 	w2 := scopeWhere("cls", sc, f, "first_labeled_at", q2)
 	if f.AdminID != nil {
+		// The first label has to be this person's own doing, by the same rule
+		// as labelActorWhere.
 		w2 += fmt.Sprintf(` and exists (
 			select 1 from public.contact_label_events le
 			 where le.contact_id = cls.contact_id
-			   and (le.admin_id = %s or le.admin_id is null))`, q2.add(*f.AdminID))
+			   and le.event_type = 'label_assigned'
+			   and le.admin_id = %s
+			   and le.occurred_at <= cls.first_labeled_at + interval '1 second')`, q2.add(*f.AdminID))
 	}
 	firstRows, err := r.pool.Query(ctx,
 		`select (cls.first_labeled_at `+jakartaDate+` as d, count(*)

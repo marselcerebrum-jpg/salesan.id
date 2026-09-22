@@ -402,16 +402,18 @@ function LabelList({
 
       <section>
         <h3 className="mb-2 text-base font-semibold text-ink">Riwayat</h3>
-        {/* How the list was assembled. A change made on the phone is listed
-            with no name against it, and that blank is a fact about WhatsApp
-            rather than a gap in the record. */}
+        {/* What this person's figures leave out. A change made on the phone
+            names nobody, so it is counted for the number, never for a person;
+            saying so here keeps an empty list from reading as "nothing
+            happened". */}
         {unattributed > 0 ? (
           <p className="mb-2 rounded-lg border border-hairline-strong bg-surface-sunken px-3 py-2 text-xs leading-relaxed text-ink-soft">
             <span className="font-medium text-ink">
               {unattributed.toLocaleString('id-ID')} perubahan
             </span>{' '}
-            di bawah dilakukan lewat HP. WhatsApp tidak menyebut siapa pelakunya, jadi perubahan itu
-            tercatat atas nomornya, bukan atas satu orang tertentu.
+            lain pada periode ini dilakukan lewat HP. WhatsApp tidak menyebut siapa pelakunya,
+            jadi perubahan itu tidak dihitung ke orang ini; angkanya tetap ada di tampilan
+            gabungan nomor tersebut.
           </p>
         ) : null}
         {rows.length === 0 ? (

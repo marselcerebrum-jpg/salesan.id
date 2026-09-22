@@ -41,6 +41,17 @@ export interface User {
   role: string;
 }
 
+/**
+ * What /me returns: the signed-in person, their workspace, and the operational
+ * role the server resolved for them. `scope.all` is true for a Leader (or an
+ * owner nobody has given a role yet), who sees the whole workspace.
+ */
+export interface Me {
+  user: User;
+  workspace: Workspace;
+  scope?: { role: '' | 'leader' | 'pic' | 'freelance'; all: boolean };
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -1513,7 +1524,24 @@ export type RealtimeEventType =
   | 'labels.sync_state'
   | 'metrics.updated'
   | 'campaign.updated'
-  | 'schedule.updated';
+  | 'schedule.updated'
+  | 'presence.viewers';
+
+/** One person with a conversation open in another browser. */
+export interface PresenceViewer {
+  user_id: string;
+  name: string;
+}
+
+/**
+ * Who has a conversation open right now. Sent whenever that changes, and once
+ * per open conversation to a browser that has just connected. An empty list
+ * means the last person left.
+ */
+export interface PresenceViewersPayload {
+  conversation_id: string;
+  viewers: PresenceViewer[];
+}
 
 /**
  * A conversation's derived reporting rows were rebuilt.

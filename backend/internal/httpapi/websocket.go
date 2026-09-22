@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -50,5 +51,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.hub.Register(conn, user.WorkspaceID)
+	// The name other browsers will see against "sedang dibuka oleh": the same
+	// one the sidebar shows this person, so they recognise themselves in it.
+	name := user.Email
+	if user.FullName != nil && strings.TrimSpace(*user.FullName) != "" {
+		name = strings.TrimSpace(*user.FullName)
+	}
+	s.hub.Register(conn, user.WorkspaceID, user.ID, name)
 }

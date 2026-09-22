@@ -193,3 +193,59 @@ func TestBroadcastIsScopedToOneWorkspace(t *testing.T) {
 		t.Fatalf("other workspace received %d events, want 0", len(b.send))
 	}
 }
+
+// Presence: two tabs of one person read as one viewer, leaving a conversation
+// announces it to the workspace, and a dropped connection takes its presence
+// with it so nobody is shown as "sedang membuka" a chat they closed hours ago.
+func TestPresenceCollapsesTabsAndClearsOnUnregister(t *testing.T) {
+	h := quietHub()
+	dial := socketPair(t)
+	ws := uuid.New()
+	budi, sari := uuid.New(), uuid.New()
+	conv := uuid.New()
+
+	tab1 := detachedClient(h, ws, dial())
+	tab1.userID, tab1.name = budi, "Budi"
+	tab2 := detachedClient(h, ws, dial())
+	tab2.userID, tab2.name = budi, "Budi"
+	other := detachedClient(h, ws, dial())
+	other.userID, other.name = sari, "Sari"
+
+	h.setViewing(tab1, conv)
+	h.setViewing(tab2, conv)
+	h.setViewing(other, conv)
+
+	got := h.viewersOf(ws, conv)
+	if len(got) != 2 {
+		t.Fatalf("viewers = %d, want 2 (two tabs of Budi collapse)", len(got))
+	}
+
+	// Every registered client, including the viewers themselves, was told.
+	for _, c := range []*Client{tab1, tab2, other} {
+		if len(c.send) == 0 {
+			t.Fatalf("a client received no presence event")
+		}
+	}
+
+	h.setViewing(tab1, uuid.Nil)
+	if got := h.viewersOf(ws, conv); len(got) != 2 {
+		t.Fatalf("closing one of Budi's tabs must keep Budi listed, got %d", len(got))
+	}
+	h.unregister(tab2)
+	got = h.viewersOf(ws, conv)
+	if len(got) != 1 || got[0].UserID != sari {
+		t.Fatalf("after Budi's last tab left, viewers = %+v, want only Sari", got)
+	}
+
+	// A browser connecting now gets the current picture without asking.
+	late := detachedClient(h, ws, dial())
+	if snap := h.openConversations(ws); len(snap) != 1 || snap[0].ConversationID != conv {
+		t.Fatalf("snapshot = %+v, want the one open conversation", snap)
+	}
+	_ = late
+
+	// Another workspace sees nothing of this.
+	if got := h.viewersOf(uuid.New(), conv); len(got) != 0 {
+		t.Fatalf("presence leaked across workspaces: %+v", got)
+	}
+}
