@@ -359,6 +359,16 @@ func (rv *Resolver) collect(
 			if c.ConversationID != nil {
 				matched[*c.ConversationID] = true
 			}
+			if c.AdminsOnly {
+				// The number is in the group but WhatsApp would refuse the
+				// message (error 420): only admins may post there. Community
+				// announcement groups are always like this.
+				problems = append(problems, models.TargetProblem{
+					Input:  c.Name,
+					Reason: "grup ini hanya mengizinkan admin mengirim pesan, dan nomor pengirim bukan admin di sana",
+				})
+				continue
+			}
 			keep(c)
 		}
 		// A chosen group the devices cannot post to is reported, not dropped.

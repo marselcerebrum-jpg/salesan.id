@@ -26,6 +26,10 @@ type TargetCandidate struct {
 	ConversationID *uuid.UUID
 	// Kind is "personal" or "group".
 	Kind string
+	// AdminsOnly is set on a group where only admins may post and the device
+	// is not one. The device is a member, so the group is listed, but a send
+	// would be refused by WhatsApp; the resolver reports it instead of trying.
+	AdminsOnly bool
 }
 
 // AccountInfo is a sending device with what the review screen needs to name it.
@@ -115,13 +119,18 @@ func (r *Repo) ContactTargets(
 // which the resolver kept four, so a broadcast to the archived ones was written
 // with no recipients and failed a second after it started, with no reason. What
 // does decide reachability is membership, so that is the only filter left.
+//
+// A group in "only admins can send" mode where the device is not an admin is
+// still returned, flagged AdminsOnly, so the resolver can say why it was not
+// used rather than leaving the operator to find out from a failed send.
 func (r *Repo) GroupTargets(
 	ctx context.Context, workspaceID uuid.UUID, accountIDs []uuid.UUID,
 ) ([]TargetCandidate, error) {
 	rows, err := r.pool.Query(ctx, `
 		select c.account_id, c.chat_jid, '',
 		       coalesce(nullif(btrim(c.name), ''), split_part(c.chat_jid, '@', 1)),
-		       null::uuid, c.id
+		       null::uuid, c.id,
+		       (c.group_announce and not c.self_is_admin)
 		  from public.conversations c
 		 where c.workspace_id = $1 and c.account_id = any($2)
 		   and c.type = 'group' and c.group_is_member is not false
@@ -130,7 +139,17 @@ func (r *Repo) GroupTargets(
 		return nil, err
 	}
 	defer rows.Close()
-	return scanCandidates(rows, "group")
+
+	out := []TargetCandidate{}
+	for rows.Next() {
+		c := TargetCandidate{Kind: "group"}
+		if err := rows.Scan(&c.AccountID, &c.ChatJID, &c.PhoneNumber, &c.Name,
+			&c.ContactID, &c.ConversationID, &c.AdminsOnly); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // GroupMemberTargets lists the individual members of the given groups.

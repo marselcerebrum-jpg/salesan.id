@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -255,7 +256,7 @@ func StoryMessage(text string, prepared *PreparedMedia, backgroundARGB uint32) (
 			backgroundARGB = defaultStoryBackground
 		}
 		return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
-			Text:          proto.String(text),
+			Text:           proto.String(text),
 			BackgroundArgb: proto.Uint32(backgroundARGB),
 		}}, nil
 	}
@@ -326,9 +327,24 @@ func (m *Manager) SendCampaignMessage(
 	resp, err := s.client.SendMessage(ctx, jid, msg,
 		whatsmeow.SendRequestExtra{ID: types.MessageID(waMessageID)})
 	if err != nil {
+		if jid.Server == types.GroupServer && isServerError(err, 420) {
+			err = fmt.Errorf("%w (%v)", ErrGroupAdminsOnly, err)
+		}
 		return SendResult{WAMessageID: waMessageID}, err
 	}
 	return SendResult{WAMessageID: waMessageID, Timestamp: resp.Timestamp}, nil
+}
+
+// ErrGroupAdminsOnly is WhatsApp refusing a group message because the group
+// only lets admins post and this number is not one. Retrying cannot change it.
+var ErrGroupAdminsOnly = errors.New("grup ini hanya mengizinkan admin mengirim pesan, dan nomor pengirim bukan admin di sana")
+
+// isServerError reports whether err is whatsmeow's "server returned error N"
+// for the given N. whatsmeow formats the code into the message rather than
+// exposing it, so the number is read back from the text.
+func isServerError(err error, code int) bool {
+	return errors.Is(err, whatsmeow.ErrServerReturnedError) &&
+		strings.HasSuffix(err.Error(), fmt.Sprintf(" %d", code))
 }
 
 // PublishStory posts one Story from one device.

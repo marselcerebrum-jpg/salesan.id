@@ -323,6 +323,7 @@ func (s *Session) refreshGroupInfo(ctx context.Context, groupJID types.JID, conv
 		TopicID:     info.TopicID,
 		OwnerJID:    info.OwnerJID.ToNonAD().String(),
 		SelfIsAdmin: selfAdmin,
+		Announce:    info.IsAnnounce,
 	})
 }
 

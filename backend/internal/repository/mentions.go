@@ -107,6 +107,10 @@ type GroupMeta struct {
 	// SelfIsAdmin decides which controls the interface offers. WhatsApp remains
 	// the authority; this only avoids asking it once per rendered row.
 	SelfIsAdmin bool
+	// Announce is WhatsApp's "only admins can send messages" setting, which
+	// every community announcement group has. With SelfIsAdmin false it means a
+	// broadcast from this number would be refused by the server (error 420).
+	Announce bool
 }
 
 // SetGroupMeta stores what a group info fetch reported.
@@ -121,9 +125,11 @@ func (r *Repo) SetGroupMeta(ctx context.Context, conversationID uuid.UUID, meta 
 		       group_topic_id    = coalesce(nullif($4, ''), group_topic_id),
 		       group_owner_jid   = coalesce(nullif($5, ''), group_owner_jid),
 		       self_is_admin     = $6,
+		       group_announce    = $7,
 		       updated_at        = now()
 		 where id = $1`,
-		conversationID, meta.Name, meta.Description, meta.TopicID, meta.OwnerJID, meta.SelfIsAdmin)
+		conversationID, meta.Name, meta.Description, meta.TopicID, meta.OwnerJID,
+		meta.SelfIsAdmin, meta.Announce)
 	return err
 }
 

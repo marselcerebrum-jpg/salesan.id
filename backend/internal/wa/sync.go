@@ -305,6 +305,7 @@ func (s *Session) syncDirectory(ctx context.Context) (*SyncResult, error) {
 			TopicID:     g.TopicID,
 			OwnerJID:    g.OwnerJID.ToNonAD().String(),
 			SelfIsAdmin: selfAdmin,
+			Announce:    g.IsAnnounce,
 		}); err != nil {
 			s.log.Warn("store group meta", "jid", g.JID.String(), "err", err)
 		}

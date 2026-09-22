@@ -564,6 +564,12 @@ func (r *Runner) sendOne(
 				log.Warn("record message failure", "err", err)
 			}
 		}
+		if errors.Is(sendErr, wa.ErrGroupAdminsOnly) {
+			// Not a transient failure: the group's settings refuse this number.
+			// Retrying three times only delays the campaign's verdict.
+			r.failTargetFinal(ctx, job, t, attemptID, "grup_admin", wa.ErrGroupAdminsOnly.Error())
+			return
+		}
 		r.failTarget(ctx, job, t, attemptID, "kirim", sendErr.Error())
 		return
 	}
@@ -753,8 +759,31 @@ func (r *Runner) failTarget(
 	attemptID uuid.UUID,
 	code, reason string,
 ) {
+	r.failTargetWith(ctx, job, t, attemptID, job.MaxAttempts, code, reason)
+}
+
+// failTargetFinal records a failure that no retry can cure, so the target is
+// settled on this attempt regardless of the campaign's retry budget.
+func (r *Runner) failTargetFinal(
+	ctx context.Context,
+	job repository.CampaignJob,
+	t repository.QueuedTarget,
+	attemptID uuid.UUID,
+	code, reason string,
+) {
+	r.failTargetWith(ctx, job, t, attemptID, t.Attempt, code, reason)
+}
+
+func (r *Runner) failTargetWith(
+	ctx context.Context,
+	job repository.CampaignJob,
+	t repository.QueuedTarget,
+	attemptID uuid.UUID,
+	maxAttempts int,
+	code, reason string,
+) {
 	retrying, err := r.repo.FinishAttemptFailed(
-		ctx, attemptID, t, job.MaxAttempts, job.RetryGapSeconds, code, truncate(reason, 400))
+		ctx, attemptID, t, maxAttempts, job.RetryGapSeconds, code, truncate(reason, 400))
 	if err != nil {
 		r.log.Error("record attempt failure", "target_id", t.ID, "err", err)
 		return
