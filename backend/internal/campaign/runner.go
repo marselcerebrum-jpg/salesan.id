@@ -408,15 +408,37 @@ func (r *Runner) runBroadcast(ctx context.Context, job repository.CampaignJob, f
 	wg.Wait()
 
 	if online == 0 {
-		// Nothing could be attempted. The lease is dropped and the campaign is
-		// left `running`, so the next tick tries again — which is the right
-		// answer when the cause is a phone that will come back.
-		log.Warn("no sender device online, campaign paused")
+		// Nothing could be attempted. Waiting is the right answer when the
+		// cause is a phone that will come back, so the lease is dropped and the
+		// campaign is left running for the next tick to retry.
+		//
+		// It is the wrong answer when the number has been logged out of
+		// WhatsApp, because then the retry never succeeds and the campaign
+		// spins for ever, sending nothing, while the screen says "Berjalan".
+		// So the wait is bounded: the first tick that finds nothing online
+		// stamps the campaign, a number coming back clears the stamp, and a
+		// campaign still stranded after the grace period is failed with the
+		// numbers named.
+		since, err := r.repo.MarkCampaignStalled(ctx, job.ID)
+		if err != nil {
+			log.Error("mark campaign stalled", "err", err)
+		} else if stalled := time.Since(since); stalled >= r.cfg.CampaignOfflineGrace {
+			log.Warn("no sender device online past the grace period, campaign failed",
+				"stalled_for", stalled.Round(time.Minute))
+			r.fail(ctx, job, r.offlineReason(ctx, job))
+			return
+		}
+		log.Warn("no sender device online, campaign paused", "since", since)
 		if err := r.repo.ReleaseCampaign(ctx, job.ID, r.owner); err != nil {
 			log.Error("release campaign", "err", err)
 		}
 		r.publish(ctx, job)
 		return
+	}
+
+	// At least one number answered, so whatever outage there was is over.
+	if err := r.repo.ClearCampaignStalled(ctx, job.ID); err != nil {
+		log.Error("clear campaign stalled", "err", err)
 	}
 
 	r.settleBroadcast(ctx, job)
@@ -1369,6 +1391,21 @@ func (r *Runner) fail(ctx context.Context, job repository.CampaignJob, reason st
 	}
 	r.activity(ctx, job, "failed", models.CampaignFailed, reason)
 	r.publish(ctx, job)
+}
+
+// offlineReason names the numbers that never came back.
+//
+// "Tidak ada perangkat pengirim yang terhubung" on its own sends the operator
+// to look through thirty-five numbers for the ones that are missing. Naming
+// them is the difference between a message and an instruction.
+func (r *Runner) offlineReason(ctx context.Context, job repository.CampaignJob) string {
+	names, err := r.repo.AccountNames(ctx, job.AccountIDs)
+	if err != nil || len(names) == 0 {
+		return "Tidak ada nomor pengirim yang terhubung ke WhatsApp. Sambungkan kembali nomornya, lalu kirim ulang."
+	}
+	return fmt.Sprintf(
+		"Nomor pengirim tidak terhubung ke WhatsApp: %s. Pindai ulang kode QR-nya, lalu kirim ulang broadcast ini.",
+		strings.Join(names, ", "))
 }
 
 // activity appends one entry to the audit log.

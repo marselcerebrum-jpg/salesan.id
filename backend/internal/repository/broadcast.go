@@ -1321,6 +1321,52 @@ func (r *Repo) RequestCancel(
 	return r.GetCampaign(ctx, workspaceID, campaignID)
 }
 
+// MarkCampaignStalled records the first moment a campaign found none of its
+// sender numbers connected, and returns that moment.
+//
+// Returns the existing stamp when one is already set, so the caller measures
+// from when the outage started rather than from now.
+func (r *Repo) MarkCampaignStalled(ctx context.Context, campaignID uuid.UUID) (time.Time, error) {
+	var since time.Time
+	err := r.pool.QueryRow(ctx, `
+		update public.content_campaigns
+		   set stalled_since = coalesce(stalled_since, now())
+		 where id = $1
+		returning stalled_since`, campaignID).Scan(&since)
+	if err != nil {
+		return time.Now(), mapErr(err)
+	}
+	return since, nil
+}
+
+// ClearCampaignStalled forgets an outage that is over.
+func (r *Repo) ClearCampaignStalled(ctx context.Context, campaignID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		update public.content_campaigns set stalled_since = null
+		 where id = $1 and stalled_since is not null`, campaignID)
+	return err
+}
+
+// AccountNames resolves numbers to the names the operator gave them.
+func (r *Repo) AccountNames(ctx context.Context, ids []uuid.UUID) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`select name from public.whatsapp_accounts where id = any($1) order by name`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // CancelRemainingWork closes off whatever a cancelled campaign never sent.
 //
 // Separate from RequestCancel because the two answer different moments: that

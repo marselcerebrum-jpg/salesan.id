@@ -153,6 +153,16 @@ type Config struct {
 	// because a Story to twenty thousand contacts legitimately takes fifteen
 	// minutes of encryption.
 	CampaignStoryTimeout time.Duration
+	// CampaignOfflineGrace is how long a campaign may find every one of its
+	// sender numbers disconnected before it is declared failed.
+	//
+	// Waiting is the right answer for a phone that drops off for a few minutes,
+	// and the wrong one for a number that has been logged out of WhatsApp: the
+	// campaign would retry every five seconds for ever, sending nothing, while
+	// the screen read "Berjalan". Half an hour is long enough to cover a
+	// reconnect and short enough that nobody waits on a campaign that is never
+	// going to start.
+	CampaignOfflineGrace time.Duration
 	// CampaignMediaMaxBytes caps a media download. Defaults to WhatsApp's own
 	// video limit, which is the largest thing that could be sent anyway.
 	CampaignMediaMaxBytes int64
@@ -243,6 +253,7 @@ func Load() (*Config, error) {
 		CampaignStoryConcurrency: integer("CAMPAIGN_STORY_CONCURRENCY", 3),
 		CampaignSendTimeout:      duration("CAMPAIGN_SEND_TIMEOUT", 2*time.Minute),
 		CampaignStoryTimeout:     duration("CAMPAIGN_STORY_TIMEOUT", 45*time.Minute),
+		CampaignOfflineGrace:     duration("CAMPAIGN_OFFLINE_GRACE", 30*time.Minute),
 		CampaignMediaMaxBytes:    int64(integer("CAMPAIGN_MEDIA_MAX_BYTES", 64*1024*1024)),
 		CampaignMediaTimeout:     duration("CAMPAIGN_MEDIA_TIMEOUT", 2*time.Minute),
 		CampaignTempDir:          os.Getenv("CAMPAIGN_TEMP_DIR"),

@@ -202,6 +202,7 @@ Yang baru, semuanya opsional:
 | `CAMPAIGN_STORY_CONCURRENCY` | `3` | Nomor yang menerbitkan Story bersamaan, seluruh proses |
 | `CAMPAIGN_SEND_TIMEOUT` | `2m` | Batas satu pengiriman Broadcast |
 | `CAMPAIGN_STORY_TIMEOUT` | `45m` | Batas satu penerbitan Story |
+| `CAMPAIGN_OFFLINE_GRACE` | `30m` | Lama semua nomor boleh putus sebelum campaign gagal |
 | `CAMPAIGN_MEDIA_MAX_BYTES` | `67108864` | Batas unduhan media |
 | `CAMPAIGN_MEDIA_TIMEOUT` | `2m` | Batas waktu unduhan |
 | `CAMPAIGN_TEMP_DIR` | sistem | Lokasi berkas sementara |
