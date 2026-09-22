@@ -200,6 +200,8 @@ Yang baru, semuanya opsional:
 | `CAMPAIGN_LEASE` | `10m` | Lama klaim sebelum worker lain boleh mengambil |
 | `CAMPAIGN_CONCURRENCY` | `4` | Campaign paralel per proses |
 | `CAMPAIGN_STORY_CONCURRENCY` | `3` | Nomor yang menerbitkan Story bersamaan, seluruh proses |
+| `CAMPAIGN_SEND_TIMEOUT` | `2m` | Batas satu pengiriman Broadcast |
+| `CAMPAIGN_STORY_TIMEOUT` | `45m` | Batas satu penerbitan Story |
 | `CAMPAIGN_MEDIA_MAX_BYTES` | `67108864` | Batas unduhan media |
 | `CAMPAIGN_MEDIA_TIMEOUT` | `2m` | Batas waktu unduhan |
 | `CAMPAIGN_TEMP_DIR` | sistem | Lokasi berkas sementara |
@@ -257,6 +259,23 @@ dalam belasan menit, bukan dua jam. Restart backend di tengah proses membatalkan
 kiriman yang sedang berjalan; ia diulang setelah lease habis. Cara memperkecil
 biayanya ada di HP: daftar privasi Status "Hanya bagikan dengan…" mempersempit
 audiens, dan whatsmeow mengikutinya.
+
+**Pengiriman harus dibatasi waktu dari sisi kita.** `SendRequestExtra.Timeout`
+bernilai nol secara bawaan, dan pada nilai itu whatsmeow menunggu jawaban server
+tanpa akhir (`send.go`: `timeoutChan` dibiarkan nil). Karena satu nomor mengirim
+berurutan, satu pengiriman yang menggantung membekukan seluruh antrean nomor
+tersebut; campaign tetap berstatus berjalan, penerima tetap `processing`, dan
+sapuan pemulihan tidak pernah jalan karena campaign-nya masih dipegang proses
+ini. Terjadi di produksi pada 22 September 2026: satu broadcast ke grup 41
+anggota menggantung tanpa error. Sekarang setiap pengiriman dan penerbitan
+dibatasi `CAMPAIGN_SEND_TIMEOUT` / `CAMPAIGN_STORY_TIMEOUT`, dan batas itu
+diteruskan ke whatsmeow sekaligus dipasang pada context.
+
+Broadcast yang lewat batas dicatat `unknown_outcome` dan **tidak** diulang
+otomatis: percobaan ulang Broadcast mencetak id pesan baru, jadi mengulang
+pengiriman yang mungkin sudah sampai berarti mengirim dua kali. Story yang lewat
+batas boleh diulang karena percobaan ulangnya memakai id pesan yang sama dan
+WhatsApp mengabaikan duplikatnya.
 
 **Komunitas dan grup khusus admin ditolak sebelum kirim.** Komunitas WhatsApp
 (induk grup) ikut muncul di `GetJoinedGroups` dengan alamat `@g.us`, dan grup

@@ -304,6 +304,9 @@ func (m *Manager) OwnJID(accountID uuid.UUID) string {
 // No presence, no typing, no read receipt: see the note at the top of this file.
 // The caller owns pacing, retry and idempotency — this function does exactly one
 // network call, with the id it was given, and reports what happened.
+// The deadline on ctx is handed to whatsmeow as well as enforced here.
+// whatsmeow only applies a deadline of its own when SendRequestExtra.Timeout is
+// set; without it, waiting for the server's acknowledgement has no end.
 func (m *Manager) SendCampaignMessage(
 	ctx context.Context,
 	accountID uuid.UUID,
@@ -325,7 +328,10 @@ func (m *Manager) SendCampaignMessage(
 	}
 
 	resp, err := s.client.SendMessage(ctx, jid, msg,
-		whatsmeow.SendRequestExtra{ID: types.MessageID(waMessageID)})
+		whatsmeow.SendRequestExtra{
+			ID:      types.MessageID(waMessageID),
+			Timeout: remaining(ctx),
+		})
 	if err != nil {
 		if jid.Server == types.GroupServer && isServerError(err, 420) {
 			err = fmt.Errorf("%w (%v)", ErrGroupAdminsOnly, err)
@@ -370,11 +376,29 @@ func (m *Manager) PublishStory(
 	}
 
 	resp, err := s.client.SendMessage(ctx, types.StatusBroadcastJID, msg,
-		whatsmeow.SendRequestExtra{ID: types.MessageID(waMessageID)})
+		whatsmeow.SendRequestExtra{
+			ID:      types.MessageID(waMessageID),
+			Timeout: remaining(ctx),
+		})
 	if err != nil {
 		return SendResult{WAMessageID: waMessageID}, err
 	}
 	return SendResult{WAMessageID: waMessageID, Timestamp: resp.Timestamp}, nil
+}
+
+// remaining is how long ctx has left, or zero when it has no deadline. Zero is
+// what whatsmeow reads as "wait indefinitely", which is the behaviour every
+// caller without a deadline already had.
+func remaining(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	left := time.Until(deadline)
+	if left < 0 {
+		return 0
+	}
+	return left
 }
 
 // RevokeStory takes one Story down from WhatsApp's own Status display.

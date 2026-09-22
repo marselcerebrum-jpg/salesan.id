@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/salesan/omnichannel/backend/internal/compose"
@@ -556,13 +557,27 @@ func (r *Runner) sendOne(
 	// the operator, in the thread, exactly what their customer received.
 	messageID := r.recordOutgoing(ctx, job, t, body, waID, prepared)
 
-	res, sendErr := r.wa.SendCampaignMessage(ctx, t.AccountID, t.ChatJID, msg, waID)
+	// Bounded, because whatsmeow's wait for the server acknowledgement is not.
+	// The deadline is on the network call alone: the writes that record what
+	// happened run on the campaign's own context, which is still live.
+	sendCtx, cancelSend := context.WithTimeout(ctx, r.cfg.CampaignSendTimeout)
+	res, sendErr := r.wa.SendCampaignMessage(sendCtx, t.AccountID, t.ChatJID, msg, waID)
+	cancelSend()
 	if sendErr != nil {
 		if messageID != nil {
 			detail := sendErr.Error()
 			if _, err := r.repo.SetMessageOutcome(ctx, *messageID, models.MessageStatusFailed, nil, &detail); err != nil {
 				log.Warn("record message failure", "err", err)
 			}
+		}
+		if ctx.Err() == nil && isSendTimeout(sendErr) {
+			// The message may or may not have reached WhatsApp, and a broadcast
+			// retry mints a fresh message id, so re-sending could deliver the
+			// same thing twice. Recorded as unknown and left for a person,
+			// exactly as an interrupted send is.
+			r.failTargetFinal(ctx, job, t, attemptID, repository.ErrCodeUnknownOutcome,
+				"Pengiriman tidak dijawab WhatsApp dalam batas waktu. Hasilnya tidak diketahui; periksa percakapan sebelum mencoba ulang.")
+			return
 		}
 		if errors.Is(sendErr, wa.ErrGroupAdminsOnly) {
 			// Not a transient failure: the group's settings refuse this number.
@@ -760,6 +775,14 @@ func (r *Runner) failTarget(
 	code, reason string,
 ) {
 	r.failTargetWith(ctx, job, t, attemptID, job.MaxAttempts, code, reason)
+}
+
+// isSendTimeout reports whether a send ended because it ran out of time rather
+// than because WhatsApp refused it. Both forms occur: the deadline can fire in
+// whatsmeow, which reports its own error, or in the context wrapped around it.
+func isSendTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, whatsmeow.ErrMessageTimedOut)
 }
 
 // failTargetFinal records a failure that no retry can cure, so the target is
@@ -1015,6 +1038,13 @@ func (r *Runner) runStory(ctx context.Context, job repository.CampaignJob, fetch
 	}
 
 	status, err := r.repo.FinishStoryCampaign(ctx, job.ID)
+	if errors.Is(err, repository.ErrNotFound) {
+		// Deleting a running Story cancels it first, but a push already in
+		// flight cannot be recalled: it finishes against a campaign row that
+		// has gone. The Story is on the phones either way. Not an error.
+		log.Info("story campaign removed while publishing")
+		return
+	}
 	if err != nil {
 		log.Error("finish story campaign", "err", err)
 		return
@@ -1110,9 +1140,17 @@ func (r *Runner) publishStory(
 	// contacts outlives a ten-minute lease, and a lease that ran out mid-push
 	// let the next pass claim the same publication again while this one was
 	// still encrypting it.
+	//
+	// Bounded as well: whatsmeow waits for the acknowledgement without a
+	// deadline, and a push that never answers would hold its slot, and the
+	// campaign, for good. Generous, because fifteen minutes of encryption is
+	// ordinary here. A retry reuses this same message id, so a Story that did
+	// land is not posted twice.
 	started := time.Now()
 	stopRenew := r.renewPublicationLease(ctx, p.ID)
-	res, sendErr := r.wa.PublishStory(ctx, p.AccountID, msg, waID)
+	sendCtx, cancelSend := context.WithTimeout(ctx, r.cfg.CampaignStoryTimeout)
+	res, sendErr := r.wa.PublishStory(sendCtx, p.AccountID, msg, waID)
+	cancelSend()
 	stopRenew()
 
 	// The outcome is recorded on a context of its own.

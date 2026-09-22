@@ -136,6 +136,23 @@ type Config struct {
 	// running them all at once would pin every core and stall the inbox. Three
 	// is the middle: a four-core server keeps one core for everything else.
 	CampaignStoryConcurrency int
+	// CampaignSendTimeout bounds one Broadcast send.
+	//
+	// whatsmeow waits for the server's acknowledgement with no deadline of its
+	// own, so a send whose ack never comes waits forever. A number sends
+	// strictly in order, so that one send freezes every recipient behind it,
+	// the campaign never settles, and the recovery sweep never runs because the
+	// campaign is still held by this process. Observed in production: a
+	// broadcast to a forty-one member group stuck at "processing" with nothing
+	// happening and nothing failing.
+	//
+	// An ordinary send finishes in seconds. Two minutes is not a target, it is
+	// the point past which something is wrong.
+	CampaignSendTimeout time.Duration
+	// CampaignStoryTimeout bounds one Story publication the same way. Longer,
+	// because a Story to twenty thousand contacts legitimately takes fifteen
+	// minutes of encryption.
+	CampaignStoryTimeout time.Duration
 	// CampaignMediaMaxBytes caps a media download. Defaults to WhatsApp's own
 	// video limit, which is the largest thing that could be sent anyway.
 	CampaignMediaMaxBytes int64
@@ -224,6 +241,8 @@ func Load() (*Config, error) {
 		// to keep answering while a large broadcast runs.
 		CampaignSendConcurrency:  integer("CAMPAIGN_SEND_CONCURRENCY", 6),
 		CampaignStoryConcurrency: integer("CAMPAIGN_STORY_CONCURRENCY", 3),
+		CampaignSendTimeout:      duration("CAMPAIGN_SEND_TIMEOUT", 2*time.Minute),
+		CampaignStoryTimeout:     duration("CAMPAIGN_STORY_TIMEOUT", 45*time.Minute),
 		CampaignMediaMaxBytes:    int64(integer("CAMPAIGN_MEDIA_MAX_BYTES", 64*1024*1024)),
 		CampaignMediaTimeout:     duration("CAMPAIGN_MEDIA_TIMEOUT", 2*time.Minute),
 		CampaignTempDir:          os.Getenv("CAMPAIGN_TEMP_DIR"),
