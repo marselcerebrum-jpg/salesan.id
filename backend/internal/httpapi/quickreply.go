@@ -54,6 +54,20 @@ func scopedApplication(
 	return &id, true
 }
 
+// canManageQuickReplies reports whether the caller may create, edit, import
+// and delete quick replies.
+//
+// Unlike campaign labels and variables (canDefineVocabulary), these are open
+// to a Freelance too: a canned reply is the Freelance's own working tool, and
+// the operator wants the people answering chats all day to be the ones who
+// keep the phrasing current. The reach is still bounded by scope: a Freelance
+// only touches replies of the applications assigned to them, and a reply for
+// "semua aplikasi" stays a Leader's to create or change (scopedApplication and
+// the owner checks below).
+func canManageQuickReplies(sc repository.Scope) bool {
+	return sc.All || sc.Role == models.RolePIC || sc.Role == models.RoleFreelance
+}
+
 // normaliseShortcut turns whatever somebody typed into a shortcut that can
 // actually be summoned.
 //
@@ -123,9 +137,9 @@ func (s *Server) handleUpsertQuickReply(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if !canDefineVocabulary(sc) {
+	if !canManageQuickReplies(sc) {
 		writeError(w, http.StatusForbidden, "forbidden",
-			"Hanya Leader dan PIC yang dapat mengelola balas cepat")
+			"Anda belum diberi peran, jadi belum dapat mengelola balas cepat")
 		return
 	}
 
@@ -443,9 +457,9 @@ func (s *Server) handleDeleteAllQuickReplies(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if !canDefineVocabulary(sc) {
+	if !canManageQuickReplies(sc) {
 		writeError(w, http.StatusForbidden, "forbidden",
-			"Hanya Leader dan PIC yang dapat mengelola balas cepat")
+			"Anda belum diberi peran, jadi belum dapat mengelola balas cepat")
 		return
 	}
 
@@ -478,9 +492,9 @@ func (s *Server) handleDeleteQuickReply(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if !canDefineVocabulary(sc) {
+	if !canManageQuickReplies(sc) {
 		writeError(w, http.StatusForbidden, "forbidden",
-			"Hanya Leader dan PIC yang dapat mengelola balas cepat")
+			"Anda belum diberi peran, jadi belum dapat mengelola balas cepat")
 		return
 	}
 	id, ok := parseUUIDParam(w, chi.URLParam(r, "id"), "quick_reply_id")

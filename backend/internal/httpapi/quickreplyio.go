@@ -120,9 +120,9 @@ func (s *Server) handleImportQuickReplies(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !canDefineVocabulary(sc) {
+	if !canManageQuickReplies(sc) {
 		writeError(w, http.StatusForbidden, "forbidden",
-			"Hanya Leader dan PIC yang dapat mengelola balas cepat")
+			"Anda belum diberi peran, jadi belum dapat mengelola balas cepat")
 		return
 	}
 

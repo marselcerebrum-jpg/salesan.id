@@ -160,3 +160,21 @@ func TestVocabularyIsDefinedByLeadersAndPICs(t *testing.T) {
 		t.Error("a Freelance uses the vocabulary but does not name it: those names appear in everybody's composer")
 	}
 }
+
+// Quick replies are the one piece of vocabulary a Freelance may keep: they are
+// that person's own working tool. The reach is still bounded by scope, which
+// scopedApplication and the owner checks enforce; this only tests the door.
+func TestQuickRepliesAreManagedByEveryRole(t *testing.T) {
+	for _, sc := range []repository.Scope{
+		{Role: models.RoleLeader, All: true},
+		{Role: models.RolePIC},
+		{Role: models.RoleFreelance},
+	} {
+		if !canManageQuickReplies(sc) {
+			t.Errorf("role %q must be able to manage quick replies", sc.Role)
+		}
+	}
+	if canManageQuickReplies(repository.Scope{}) {
+		t.Error("somebody with no role and no ownership has nothing to edit")
+	}
+}

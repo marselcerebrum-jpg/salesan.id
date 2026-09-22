@@ -58,7 +58,8 @@ import type { AnalyticsScope, Application, QuickReply } from '@/lib/types';
  * Scoped per application for the same reason everything else here is: a reply
  * written in one brand's voice, pasted into another brand's chat, is a mistake
  * that reaches a customer. A reply with no application is the company's own and
- * available everywhere, which only a Leader can create.
+ * available everywhere, which only a Leader can create. Replies for one
+ * application are kept by whoever holds it: Leader, PIC or Freelance alike.
  */
 export default function QuickRepliesPage() {
   const { data, error, isLoading, mutate } = useSWR<{ quick_replies: QuickReply[] }>(
@@ -131,8 +132,13 @@ export default function QuickRepliesPage() {
   }
 
   const role = org.data?.scope.role ?? '';
-  const canEdit = role === 'leader' || role === 'pic' || role === '';
-  const isLeader = role === 'leader' || role === '';
+  // Every operational role keeps its own replies: a Freelance edits those of
+  // the applications assigned to them, a PIC those of their brands, a Leader
+  // everything. Only a workspace-wide reply ("semua aplikasi") is a Leader's.
+  // Until /org/members answers, `role` is '' and the buttons show; the server
+  // still decides, so a wrong guess costs one refused click, not a leak.
+  const canEdit = org.data ? Boolean(org.data.scope.is_leader || role) : true;
+  const isLeader = Boolean(org.data?.scope.is_leader) || role === 'leader' || role === '';
 
   // Memoised so the list below it is not rebuilt on every keystroke elsewhere
   // on the page: `?? []` is a fresh array each render otherwise.
