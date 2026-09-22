@@ -33,26 +33,26 @@ import (
 
 // SaveBroadcastInput is a campaign to create or replace the draft of.
 type SaveBroadcastInput struct {
-	CampaignType    string
-	Name            string
-	Template        string
-	ComposeMode     string
-	ApplicationID   *uuid.UUID
-	AccountIDs      []uuid.UUID
-	MediaURL        *string
-	MediaKind       *string
-	MediaMime       *string
-	MediaSizeBytes  *int64
-	MediaSHA256 *string
+	CampaignType   string
+	Name           string
+	Template       string
+	ComposeMode    string
+	ApplicationID  *uuid.UUID
+	AccountIDs     []uuid.UUID
+	MediaURL       *string
+	MediaKind      *string
+	MediaMime      *string
+	MediaSizeBytes *int64
+	MediaSHA256    *string
 	// MediaStoragePath and MediaFileName describe an uploaded document living in
 	// the private bucket. The bytes are never in the database, and the runner
 	// deletes the object once the campaign is over.
 	MediaStoragePath *string
 	MediaFileName    *string
 	Caption          *string
-	DelayProfile    string
-	DelayMinSeconds *int
-	DelayMaxSeconds *int
+	DelayProfile     string
+	DelayMinSeconds  *int
+	DelayMaxSeconds  *int
 	// AutoRetryOnDisconnect keeps a disconnected number's share waiting for it.
 	AutoRetryOnDisconnect bool
 	// Recurrence is "daily", "weekly", "monthly", or empty for a single run.
@@ -62,12 +62,12 @@ type SaveBroadcastInput struct {
 	RecurrenceTime    string
 	RecurrenceWeekday *int
 	RecurrenceDay     *int
-	TargetSource    string
-	ScheduledAt     *time.Time
-	MaxAttempts     int
-	RetryGapSeconds int
-	Targets         []models.ResolvedTarget
-	LabelIDs        []uuid.UUID
+	TargetSource      string
+	ScheduledAt       *time.Time
+	MaxAttempts       int
+	RetryGapSeconds   int
+	Targets           []models.ResolvedTarget
+	LabelIDs          []uuid.UUID
 }
 
 // SaveBroadcast writes a campaign together with its devices and recipients.
@@ -431,15 +431,15 @@ func syncDeviceCounts(ctx context.Context, tx pgx.Tx, campaignID uuid.UUID) erro
 
 // CampaignJob is a campaign a worker has taken responsibility for.
 type CampaignJob struct {
-	ID              uuid.UUID
-	WorkspaceID     uuid.UUID
-	ApplicationID   *uuid.UUID
-	CampaignType    string
-	Name            string
-	Template        string
-	ComposeMode     string
-	MediaURL  *string
-	MediaKind *string
+	ID            uuid.UUID
+	WorkspaceID   uuid.UUID
+	ApplicationID *uuid.UUID
+	CampaignType  string
+	Name          string
+	Template      string
+	ComposeMode   string
+	MediaURL      *string
+	MediaKind     *string
 	// MediaStoragePath names an uploaded document in the private bucket, for a
 	// campaign that attached a file rather than a link.
 	MediaStoragePath *string
@@ -493,7 +493,14 @@ func (r *Repo) ClaimDueCampaigns(
 		   select id from public.content_campaigns
 		    where status in ('scheduled', 'running')
 		      and archived_at is null
-		      and cancel_requested = false
+		      -- A cancel pressed while a worker held the campaign cannot close
+		      -- it: the row stays running with cancel_requested set, and the
+		      -- worker is meant to notice and settle it. If that worker dies
+		      -- first, from a restart or a send that hung, nobody else would
+		      -- ever look at the row again and the campaign would read
+		      -- "berjalan" for good with recipients waiting. Claiming it is
+		      -- what lets the next worker finish the cancellation.
+		      and (cancel_requested = false or status = 'running')
 		      and coalesce(scheduled_at, now()) <= now()
 		      and (lease_owner is null or lease_expires_at is null or lease_expires_at < now())
 		    order by coalesce(scheduled_at, created_at)
@@ -1312,6 +1319,45 @@ func (r *Repo) RequestCancel(
 		return nil, err
 	}
 	return r.GetCampaign(ctx, workspaceID, campaignID)
+}
+
+// CancelRemainingWork closes off whatever a cancelled campaign never sent.
+//
+// Separate from RequestCancel because the two answer different moments: that
+// one runs when the operator presses cancel, this one when a worker picks the
+// campaign up afterwards and has to leave it in a state the report can explain.
+// Recipients still `processing` are included, because by the time this is
+// called no device is working and a processing row is the remains of a worker
+// that stopped.
+func (r *Repo) CancelRemainingWork(ctx context.Context, campaignID uuid.UUID) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		update public.campaign_targets
+		   set status = 'cancelled', cancelled_at = now(),
+		       next_attempt_at = null, lease_expires_at = null
+		 where campaign_id = $1
+		   and status in ('pending', 'retry_wait', 'processing')`, campaignID)
+	if err != nil {
+		return 0, err
+	}
+	n := int(tag.RowsAffected())
+
+	if _, err := tx.Exec(ctx, `
+		update public.story_publications
+		   set status = 'cancelled', next_attempt_at = null, lease_expires_at = null
+		 where campaign_id = $1 and status in ('pending', 'processing')`,
+		campaignID); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // RetryFailed requeues the recipients that did not make it.

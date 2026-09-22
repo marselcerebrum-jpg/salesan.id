@@ -283,6 +283,20 @@ func (r *Runner) run(job repository.CampaignJob) {
 		log.Warn("reconciled interrupted sends", "confirmed_sent", sent, "unknown", unknown)
 	}
 
+	// A cancel that arrived while an earlier worker held this campaign is
+	// settled before anything else. Pressing cancel can only close a campaign
+	// nobody is running; one pressed mid-flight just sets the flag and waits
+	// for the worker to notice. That worker may never have: a restart, or a
+	// send that hung before this release bounded them. The campaign is claimed
+	// again precisely so it can be closed here, and closing it first means no
+	// media is fetched and no recipient is sent to on the way out.
+	if cancelled, err := r.repo.CancelRequested(ctx, job.ID); err != nil {
+		log.Error("check cancel request", "err", err)
+	} else if cancelled {
+		r.settleCancelled(ctx, job)
+		return
+	}
+
 	// Media is fetched once for the whole campaign and uploaded once per device.
 	// The temporary file is removed on every path out of this function, which is
 	// what keeps "jangan simpan file media" true in practice and not just in the
@@ -814,6 +828,40 @@ func (r *Runner) failTargetWith(
 	r.log.Warn("campaign send failed",
 		"campaign_id", job.ID, "target_id", t.ID,
 		"attempt", t.Attempt, "retrying", retrying, "reason", reason)
+	r.publish(ctx, job)
+}
+
+// settleCancelled closes a campaign whose cancellation was never completed.
+//
+// The recipients that never went out are marked cancelled rather than left
+// pending, because "dibatalkan" with forty recipients still reading "menunggu"
+// is a report nobody can act on.
+func (r *Runner) settleCancelled(ctx context.Context, job repository.CampaignJob) {
+	log := r.log.With("campaign_id", job.ID, "type", job.CampaignType)
+
+	n, err := r.repo.CancelRemainingWork(ctx, job.ID)
+	if err != nil {
+		log.Error("cancel remaining work", "err", err)
+		return
+	}
+
+	var status string
+	if job.CampaignType == models.CampaignStory {
+		status, err = r.repo.FinishStoryCampaign(ctx, job.ID)
+	} else {
+		status, err = r.repo.FinishCampaign(ctx, job.ID)
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		log.Info("campaign removed while being cancelled")
+		return
+	}
+	if err != nil {
+		log.Error("finish cancelled campaign", "err", err)
+		return
+	}
+
+	log.Info("campaign cancellation completed", "status", status, "recipients_cancelled", n)
+	r.activity(ctx, job, activityFor(status), status, "")
 	r.publish(ctx, job)
 }
 
