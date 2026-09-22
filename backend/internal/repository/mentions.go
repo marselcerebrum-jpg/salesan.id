@@ -111,6 +111,10 @@ type GroupMeta struct {
 	// every community announcement group has. With SelfIsAdmin false it means a
 	// broadcast from this number would be refused by the server (error 420).
 	Announce bool
+	// Community marks a community itself (the parent of its groups). It is
+	// listed among joined groups with a @g.us address but is not a chat: a
+	// message to it is refused by the server.
+	Community bool
 }
 
 // SetGroupMeta stores what a group info fetch reported.
@@ -126,10 +130,11 @@ func (r *Repo) SetGroupMeta(ctx context.Context, conversationID uuid.UUID, meta 
 		       group_owner_jid   = coalesce(nullif($5, ''), group_owner_jid),
 		       self_is_admin     = $6,
 		       group_announce    = $7,
+		       group_is_community = $8,
 		       updated_at        = now()
 		 where id = $1`,
 		conversationID, meta.Name, meta.Description, meta.TopicID, meta.OwnerJID,
-		meta.SelfIsAdmin, meta.Announce)
+		meta.SelfIsAdmin, meta.Announce, meta.Community)
 	return err
 }
 

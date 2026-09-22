@@ -335,9 +335,11 @@ func (m *Manager) SendCampaignMessage(
 	return SendResult{WAMessageID: waMessageID, Timestamp: resp.Timestamp}, nil
 }
 
-// ErrGroupAdminsOnly is WhatsApp refusing a group message because the group
-// only lets admins post and this number is not one. Retrying cannot change it.
-var ErrGroupAdminsOnly = errors.New("grup ini hanya mengizinkan admin mengirim pesan, dan nomor pengirim bukan admin di sana")
+// ErrGroupAdminsOnly is WhatsApp refusing a group message with error 420:
+// the group only lets admins post and this number is not one, or the address
+// is a community itself rather than one of its groups. Retrying cannot change
+// either.
+var ErrGroupAdminsOnly = errors.New("WhatsApp menolak pesan ke grup ini (error 420): hanya admin yang boleh mengirim di sana, atau ini komunitas yang bukan grup chat")
 
 // isServerError reports whether err is whatsmeow's "server returned error N"
 // for the given N. whatsmeow formats the code into the message rather than

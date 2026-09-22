@@ -30,6 +30,9 @@ type TargetCandidate struct {
 	// is not one. The device is a member, so the group is listed, but a send
 	// would be refused by WhatsApp; the resolver reports it instead of trying.
 	AdminsOnly bool
+	// Community is set when the row is a community itself rather than one of
+	// its groups. Not a chat; nothing can be sent to it.
+	Community bool
 }
 
 // AccountInfo is a sending device with what the review screen needs to name it.
@@ -130,7 +133,7 @@ func (r *Repo) GroupTargets(
 		select c.account_id, c.chat_jid, '',
 		       coalesce(nullif(btrim(c.name), ''), split_part(c.chat_jid, '@', 1)),
 		       null::uuid, c.id,
-		       (c.group_announce and not c.self_is_admin)
+		       (c.group_announce and not c.self_is_admin), c.group_is_community
 		  from public.conversations c
 		 where c.workspace_id = $1 and c.account_id = any($2)
 		   and c.type = 'group' and c.group_is_member is not false
@@ -144,7 +147,7 @@ func (r *Repo) GroupTargets(
 	for rows.Next() {
 		c := TargetCandidate{Kind: "group"}
 		if err := rows.Scan(&c.AccountID, &c.ChatJID, &c.PhoneNumber, &c.Name,
-			&c.ContactID, &c.ConversationID, &c.AdminsOnly); err != nil {
+			&c.ContactID, &c.ConversationID, &c.AdminsOnly, &c.Community); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

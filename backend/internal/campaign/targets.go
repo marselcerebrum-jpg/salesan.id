@@ -359,6 +359,16 @@ func (rv *Resolver) collect(
 			if c.ConversationID != nil {
 				matched[*c.ConversationID] = true
 			}
+			if c.Community {
+				// A community is the parent of its groups, not a chat.
+				// WhatsApp lists it among joined groups and refuses messages
+				// to it (error 420).
+				problems = append(problems, models.TargetProblem{
+					Input:  c.Name,
+					Reason: "ini komunitas, bukan grup chat; pilih grup di dalam komunitas tersebut",
+				})
+				continue
+			}
 			if c.AdminsOnly {
 				// The number is in the group but WhatsApp would refuse the
 				// message (error 420): only admins may post there. Community
