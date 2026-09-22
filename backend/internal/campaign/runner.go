@@ -587,10 +587,18 @@ func (r *Runner) recordOutgoing(
 		if t.DisplayName != nil {
 			name = *t.DisplayName
 		}
+		// A number is also the thread's pn_jid. Passing it as such lets the
+		// lookup find a thread keyed by the person's LID, instead of opening a
+		// second one keyed by the number beside it.
+		pnJID := ""
+		if kind == models.ConversationTypePersonal && strings.HasSuffix(t.ChatJID, "@"+types.DefaultUserServer) {
+			pnJID = t.ChatJID
+		}
 		id, err := r.repo.UpsertConversation(ctx, repository.UpsertConversationInput{
 			WorkspaceID: t.WorkspaceID,
 			AccountID:   t.AccountID,
 			ChatJID:     t.ChatJID,
+			PNJID:       pnJID,
 			Type:        kind,
 			Name:        name,
 			ContactID:   t.ContactID,

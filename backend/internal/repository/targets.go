@@ -172,17 +172,31 @@ func (r *Repo) GroupMemberTargets(
 
 // LookupChats resolves raw JIDs against what each device already knows, so a
 // pasted number that is already a saved contact keeps its name and its thread.
+//
+// Matched on either of a person's addresses. A thread is keyed by whichever
+// form WhatsApp used first, and for anyone who first turned up through a group
+// that is the LID, with the number in pn_jid. Matching the number against
+// chat_jid alone missed those, the campaign then wrote its message into a
+// fresh thread keyed by the number, and the inbox showed the same person twice:
+// "6281395967940" holding the broadcast, "Thaariq" holding the conversation.
+// The candidate keeps the address that was asked for, so the caller's map still
+// finds it, and carries the existing thread's id, which is what stops the
+// second thread from being created.
 func (r *Repo) LookupChats(
 	ctx context.Context, workspaceID uuid.UUID, accountIDs []uuid.UUID, jids []string,
 ) (map[string]TargetCandidate, error) {
 	rows, err := r.pool.Query(ctx, `
-		select c.account_id, c.chat_jid, coalesce(ct.phone_number, ''),
+		select c.account_id,
+		       case when c.chat_jid = any($3) then c.chat_jid else c.pn_jid end as asked,
+		       coalesce(ct.phone_number, ''),
 		       coalesce(nullif(btrim(ct.name), ''), nullif(btrim(ct.push_name), ''),
-		                nullif(btrim(c.name), ''), split_part(c.chat_jid, '@', 1)),
+		                nullif(btrim(c.name), ''),
+		                split_part(case when c.chat_jid = any($3) then c.chat_jid else c.pn_jid end, '@', 1)),
 		       ct.id, c.id
 		  from public.conversations c
 		  left join public.contacts ct on ct.id = c.contact_id
-		 where c.workspace_id = $1 and c.account_id = any($2) and c.chat_jid = any($3)`,
+		 where c.workspace_id = $1 and c.account_id = any($2)
+		   and (c.chat_jid = any($3) or c.pn_jid = any($3))`,
 		workspaceID, accountIDs, jids)
 	if err != nil {
 		return nil, err
