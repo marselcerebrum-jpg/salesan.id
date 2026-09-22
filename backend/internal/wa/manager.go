@@ -90,23 +90,28 @@ func NewManager(ctx context.Context, cfg *config.Config, repo *repository.Repo, 
 	// default for MaxOpenConns is unlimited. This process therefore held two
 	// pools against the same database, one of them with no ceiling at all.
 	//
-	// That ceiling is not ours to ignore. This project's Supabase session
-	// pooler refuses past fifteen clients:
+	// The ceiling used to be four, and four was right when this talked to
+	// Supabase's hosted session pooler, which refuses past fifteen clients:
 	//
 	//   FATAL: (EMAXCONNSESSION) max clients reached in session mode -
 	//   max clients are limited to pool_size: 15
 	//
-	// Fifteen covers everything: this pool, the repository pool, and any
-	// migration or diagnostic run alongside. Four here and eight there leaves
-	// three spare, which is enough to run `cmd/migrate` while the server is up.
-	// Whatsmeow needs far less than four in practice; it reads keys and writes
-	// app-state versions, and it does so per account rather than per request.
+	// Postgres now runs on the same machine, with max_connections at 100 and
+	// around twenty-five of those spoken for by Supabase's own services. The
+	// fifteen-client wall is gone, and four had stopped being caution and
+	// started being a queue: thirty-one numbers share this pool, and every one
+	// of them loads a session key before it can encrypt anything.
+	//
+	// Sixteen here and sixteen in the repository pool is thirty-two, which
+	// leaves room for Supabase, for cmd/migrate, and for a diagnostic session
+	// alongside. Raise it further only after raising max_connections, in that
+	// order.
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open whatsmeow store: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(4)
-	sqlDB.SetMaxIdleConns(2)
+	sqlDB.SetMaxOpenConns(16)
+	sqlDB.SetMaxIdleConns(4)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
 

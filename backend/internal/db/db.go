@@ -42,15 +42,21 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	// tools exactly when they are needed. Ten leaves five, which is enough for
 	// a migration to run while the server is up.
 	//
-	// Eight here, four for whatsmeow's own pool (see wa.NewManager), three
-	// spare. This process holds two pools against the same database, and until
-	// both were bounded the pair of them could reach the ceiling on their own.
+	// Eight here and four for whatsmeow was the split while this talked to
+	// Supabase's hosted session pooler and its ceiling of fifteen clients.
+	// Postgres now runs on the same machine with max_connections at 100, about
+	// twenty-five of them held by Supabase's own services, so that ceiling no
+	// longer applies. Eight had become the reason incoming messages were
+	// dropped during a restart, when every reconnecting number wanted the pool
+	// at once: "persist incoming message: context deadline exceeded".
 	//
-	// Raising this is a Supabase setting first and a line of Go second: lift
-	// the pooler's pool_size, then lift this, in that order. What actually
-	// protects chat from a heavy report is not this number but the analytics
-	// budget, capped at three (see repository.analyticsFanout).
-	cfg.MaxConns = 8
+	// Sixteen here, sixteen for whatsmeow (see wa.NewManager), which leaves
+	// Supabase its own connections plus room for cmd/migrate and a diagnostic
+	// session. Raising this is a max_connections change first and a line of Go
+	// second, in that order. What actually protects chat from a heavy report is
+	// not this number but the analytics budget, capped at three (see
+	// repository.analyticsFanout).
+	cfg.MaxConns = 16
 	// Two warm connections rather than one, so the first request after an idle
 	// spell does not pay for a TLS handshake before it can answer.
 	cfg.MinConns = 2
