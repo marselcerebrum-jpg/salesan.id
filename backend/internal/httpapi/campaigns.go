@@ -141,6 +141,9 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !requireRecipients(w, built) {
+		return
+	}
 
 	campaign, err := s.repo.SaveBroadcast(r.Context(), user.WorkspaceID, user.ID, built.input)
 	if err != nil {
@@ -168,6 +171,25 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		"campaign": campaign,
 		"plan":     built.plan,
 	})
+}
+
+// requireRecipients refuses to write a broadcast nobody would receive.
+//
+// The preview may show zero: that is the review screen doing its job. Saving
+// zero is different. It produced a campaign that the runner picked up, found
+// nothing to send, and marked failed within a second with no reason, which the
+// operator read as "broadcast gagal kirim". The refusal names the first thing
+// the resolver rejected, since that is usually the whole story.
+func requireRecipients(w http.ResponseWriter, built builtCampaign) bool {
+	if built.input.CampaignType == models.CampaignStory || len(built.input.Targets) > 0 {
+		return true
+	}
+	msg := "Tidak ada penerima yang bisa dikirimi. Periksa kembali grup atau kontak yang dipilih."
+	if built.plan != nil && len(built.plan.Problems) > 0 {
+		msg += " Contoh: " + built.plan.Problems[0].Reason + "."
+	}
+	writeError(w, http.StatusBadRequest, "no_recipients", msg)
+	return false
 }
 
 // handleCampaignSource hands a campaign back in the shape the composer takes.
@@ -237,6 +259,9 @@ func (s *Server) handleUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	built, ok := s.buildCampaign(w, r, sc, req)
 	if !ok {
+		return
+	}
+	if !requireRecipients(w, built) {
 		return
 	}
 

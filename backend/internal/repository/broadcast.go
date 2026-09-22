@@ -929,6 +929,12 @@ func (r *Repo) FinishCampaign(ctx context.Context, campaignID uuid.UUID) (string
 		       end)::public.campaign_status,
 		       success_count = tally.ok,
 		       failed_count = tally.bad,
+		       -- A campaign with no recipients at all says so, rather than
+		       -- failing with the reason column blank.
+		       failure_reason = case
+		         when tally.total = 0
+		           then 'Tidak ada penerima yang bisa dikirimi: semua grup/kontak yang dipilih tidak terjangkau perangkat pengirim.'
+		         else cc.failure_reason end,
 		       finished_at = now(),
 		       executed_at = coalesce(cc.executed_at, now()),
 		       lease_owner = null,

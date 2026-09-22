@@ -351,11 +351,26 @@ func (rv *Resolver) collect(
 		for _, id := range req.GroupIDs {
 			wanted[id] = true
 		}
+		matched := map[uuid.UUID]bool{}
 		for _, c := range found {
 			if len(wanted) > 0 && (c.ConversationID == nil || !wanted[*c.ConversationID]) {
 				continue
 			}
+			if c.ConversationID != nil {
+				matched[*c.ConversationID] = true
+			}
 			keep(c)
+		}
+		// A chosen group the devices cannot post to is reported, not dropped.
+		// Silently skipping it is how a campaign ended up written with no
+		// recipients and no explanation.
+		for _, id := range req.GroupIDs {
+			if !matched[id] {
+				problems = append(problems, models.TargetProblem{
+					Input:  id.String(),
+					Reason: "grup ini tidak ditemukan pada perangkat yang dipilih, atau nomor pengirim bukan lagi anggotanya",
+				})
+			}
 		}
 
 	default:

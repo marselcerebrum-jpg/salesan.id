@@ -107,6 +107,14 @@ func (r *Repo) ContactTargets(
 }
 
 // GroupTargets lists groups the given devices belong to.
+//
+// Archived groups are included. "Diarsipkan" is how the phone tidies its chat
+// list, mirrored here from app state; it says nothing about whether the number
+// can post there. This used to exclude them, and on a phone whose owner had
+// archived every class group the recipient picker offered thirty-one groups of
+// which the resolver kept four, so a broadcast to the archived ones was written
+// with no recipients and failed a second after it started, with no reason. What
+// does decide reachability is membership, so that is the only filter left.
 func (r *Repo) GroupTargets(
 	ctx context.Context, workspaceID uuid.UUID, accountIDs []uuid.UUID,
 ) ([]TargetCandidate, error) {
@@ -116,7 +124,7 @@ func (r *Repo) GroupTargets(
 		       null::uuid, c.id
 		  from public.conversations c
 		 where c.workspace_id = $1 and c.account_id = any($2)
-		   and c.type = 'group' and c.is_archived = false
+		   and c.type = 'group' and c.group_is_member is not false
 		 order by 4`, workspaceID, accountIDs)
 	if err != nil {
 		return nil, err
