@@ -157,7 +157,8 @@ type DashboardSummary struct {
 	OutboundManualPersonal int `json:"outbound_manual_personal"`
 	// OutboundDevicePersonal is bubbles sent from the phone itself. Real work,
 	// but WhatsApp does not say who did it, so it is reported beside the figure
-	// above rather than folded into it.
+	// above rather than folded into it, and it is zero on any view about one
+	// person: the phone's work belongs to the number, not to them.
 	OutboundDevicePersonal int `json:"outbound_device_personal"`
 
 	// ContactsInbound is distinct contacts who wrote at least once.

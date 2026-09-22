@@ -32,7 +32,7 @@ import {
   type ViewPatch,
   type ViewState,
 } from '@/lib/useAnalyticsFilter';
-import type { MemberPerformance, TeamReport } from '@/lib/types';
+import type { Me, MemberPerformance, TeamReport } from '@/lib/types';
 
 /**
  * Performa — the one place operational figures live.
@@ -86,7 +86,18 @@ function Performa() {
   const report = team.data?.report;
   const role = report?.role ?? '';
   const members = report?.members ?? [];
-  const me = members.find((m) => m.role === role && m.user_id) ?? null;
+
+  /*
+   * Which row is mine: matched by id, never by role.
+   *
+   * This used to take the first member with the reader's role, which is the
+   * reader only when they are the sole person in that role. With two Leaders
+   * and three PICs it was somebody else: a PIC opening "Performa Saya" was
+   * reading the first PIC's figures under the first PIC's name.
+   */
+  const { data: profile } = useSWR<Me>('/me', fetcher);
+  const myId = profile?.user.id;
+  const me = (myId && members.find((m) => m.user_id === myId)) || null;
 
   const isLeader = role === 'leader';
   const isFreelance = role === 'freelance';
@@ -361,6 +372,8 @@ function OwnPerformance({
         <MemberHeader member={me} />
       ) : null}
 
+      {mode === 'pribadi' ? <DeviceActivityHint report={report} /> : null}
+
       <PerformanceSummary query={scoped} showApplicationSplit {...rest} />
 
       {mode === 'gabungan' ? <UnattributedNote report={report} /> : null}
@@ -397,7 +410,7 @@ function OwnPerformance({
           query={scoped}
           description={
             mode === 'pribadi'
-              ? 'Aktivitas yang benar-benar dilakukan akun ini. Pesan yang dikirim dari HP tanpa pelaku terverifikasi tidak masuk ke sini; perubahan label chat tetap masuk, karena dihitung atas nomornya.'
+              ? 'Aktivitas yang benar-benar dilakukan akun ini lewat web. Pesan dan perubahan label yang dilakukan dari HP tidak masuk ke sini, karena WhatsApp tidak menyebut pelakunya.'
               : 'Seluruh aktivitas dalam lingkup akun Anda.'
           }
         />
@@ -664,6 +677,32 @@ function UnattributedNote({ report }: { report: TeamReport | undefined }) {
         <Small label="Pesan Keluar Grup" value={String(u.group_replies)} />
       </div>
     </section>
+  );
+}
+
+/**
+ * Why a personal view can read zero on a busy day.
+ *
+ * Shown on every personal view, not only when the cards are empty: the
+ * figures below count what was done signed in on the web, and a team that
+ * answers from the phone all day has its work on the number, not on a person.
+ * Without this the three personal tabs read as one identical, broken page.
+ */
+function DeviceActivityHint({ report }: { report: TeamReport | undefined }) {
+  const u = report?.unattributed;
+  const total = u ? u.outbound_manual + u.group_replies : 0;
+  if (!u || total === 0) return null;
+
+  return (
+    <p className="mt-3 rounded-lg border border-hairline-strong bg-surface-sunken px-3 py-2 text-xs leading-relaxed text-ink-soft">
+      <span className="font-medium text-ink">
+        {total.toLocaleString('id-ID')} pesan keluar
+      </span>{' '}
+      pada periode ini dikirim langsung dari HP. WhatsApp tidak menyebut siapa yang mengirimnya,
+      jadi pesan itu tercatat atas nomornya dan tidak masuk ke angka pribadi siapa pun. Hanya
+      pekerjaan yang dilakukan lewat web yang tercatat atas nama orang; lihat rinciannya di
+      &quot;Tim&quot; atau di Dashboard.
+    </p>
   );
 }
 

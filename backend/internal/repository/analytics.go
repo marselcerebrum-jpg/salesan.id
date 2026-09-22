@@ -323,16 +323,20 @@ func (r *Repo) collectPersonal(
 	// Inbound is restricted to conversations the filtered admin worked in;
 	// outbound is restricted to messages they actually sent.
 	inboundNarrow := adminTouchedConversation(f, q)
-	var outboundNarrow string
+	var outboundNarrow, deviceNarrow string
 	if f.AdminID != nil {
 		outboundNarrow = fmt.Sprintf(" and m.sent_by = %s", q.add(*f.AdminID))
+		// A phone message names nobody, so it is not this person's. Counting
+		// it here gave every personal view on a shared number the same "Keluar
+		// (HP)" column, which made three people's pages read as one page.
+		deviceNarrow = " and false"
 	}
 
 	sql := `
 		select (m.timestamp ` + jakartaDate + ` as d,
 		       count(*) filter (where not m.from_me` + inboundNarrow + `) as inbound,
 		       count(*) filter (where m.from_me and ` + manualWeb + outboundNarrow + `) as outbound_web,
-		       count(*) filter (where m.from_me and m.sender_source = 'whatsapp_device') as outbound_device,
+		       count(*) filter (where m.from_me and m.sender_source = 'whatsapp_device'` + deviceNarrow + `) as outbound_device,
 		       count(distinct m.conversation_id) filter (where not m.from_me` + inboundNarrow + `) as convs_in,
 		       count(distinct m.conversation_id) filter (
 		         where m.from_me and ` + manualWeb + outboundNarrow + `) as convs_served
