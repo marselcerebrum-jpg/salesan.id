@@ -2,8 +2,9 @@ package wa
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -634,8 +635,7 @@ func (s *Session) handleReceipt(evt *events.Receipt) {
 	// offline sync, and once per linked device. The key folds in the timestamp
 	// and the message ids, so a genuinely later receipt still gets through
 	// while a replay of the same one is dropped.
-	key := fmt.Sprintf("receipt:%s:%s:%d:%s",
-		receiptType, chat, at.UnixMilli(), strings.Join(evt.MessageIDs, ","))
+	key := receiptKey(receiptType, chat, at, evt.MessageIDs)
 	if fresh, err := s.mgr.repo.ClaimReceiptEvent(ctx, s.AccountID, key); err != nil {
 		s.log.Warn("claim receipt event", "err", err)
 	} else if !fresh {
@@ -695,6 +695,32 @@ func (s *Session) handleReceipt(evt *events.Receipt) {
 		"account_id": s.AccountID,
 		"changes":    changes,
 	})
+}
+
+// receiptKey identifies one receipt for the idempotency table.
+//
+// Hashed, because the obvious key — the message ids joined together — is
+// unbounded. WhatsApp sends one receipt covering every message the reader just
+// caught up on, and a reader opening a busy group produces a key thousands of
+// characters long. Postgres refuses to index a row past 2704 bytes, so the
+// claim failed outright:
+//
+//	index row size 4688 exceeds btree version 4 maximum 2704
+//
+// A failed claim is not a harmless miss. The receipt is skipped, and the
+// delivered and read marks it carried are never applied, so the interface goes
+// on showing "Terkirim" for messages the customer has already read. Seventeen
+// of these in one hour, each one a batch of statuses that never landed.
+//
+// A digest is fixed width and still distinguishes the same reader catching up
+// twice from two genuinely different receipts.
+func receiptKey(receiptType, chat string, at time.Time, ids []types.MessageID) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00%s\x00%d\x00", receiptType, chat, at.UnixMilli())
+	for _, id := range ids {
+		fmt.Fprintf(h, "%s\x00", id)
+	}
+	return "receipt:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // recordStoryViews turns a status@broadcast receipt into detected views.
