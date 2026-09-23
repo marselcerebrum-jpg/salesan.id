@@ -1374,6 +1374,38 @@ func (r *Repo) AccountNames(ctx context.Context, ids []uuid.UUID) ([]string, err
 	return out, rows.Err()
 }
 
+// CloseOrphanedTargets settles recipients left mid-send by a campaign that has
+// already finished.
+//
+// A campaign cancelled while a worker held one of its recipients leaves that
+// row at `processing`. RequestCancel does not touch it, because a live worker
+// may still be sending it, and the worker never comes back to it either: the
+// campaign is in a terminal state by then, and the scheduler only claims ones
+// that are scheduled or running. So the row sits at "sedang diproses" for good,
+// and the report for a cancelled campaign never adds up.
+//
+// Only rows whose lease has expired are touched, so a send genuinely in flight
+// is never stolen from the worker doing it. The outcome is recorded as unknown
+// rather than failed, because the message may well have gone out before the
+// worker stopped, and saying otherwise would invite somebody to send it twice.
+func (r *Repo) CloseOrphanedTargets(ctx context.Context) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		update public.campaign_targets t
+		   set status = 'failed', lease_expires_at = null, next_attempt_at = null,
+		       error_code = $1,
+		       failure_reason = 'Campaign sudah ditutup sebelum pengiriman ini selesai. Hasilnya tidak diketahui; periksa percakapan sebelum mencoba ulang.'
+		  from public.content_campaigns c
+		 where c.id = t.campaign_id
+		   and t.status = 'processing'
+		   and t.lease_expires_at is not null and t.lease_expires_at < now()
+		   and c.status in ('cancelled', 'completed', 'failed', 'partial')`,
+		ErrCodeUnknownOutcome)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // CancelRemainingWork closes off whatever a cancelled campaign never sent.
 //
 // Separate from RequestCancel because the two answer different moments: that

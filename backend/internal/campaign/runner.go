@@ -252,6 +252,19 @@ func (r *Runner) expiryLoop() {
 		if n > 0 {
 			r.log.Info("stories expired", "count", n)
 		}
+
+		// Recipients a finished campaign left mid-send. Swept here rather than
+		// by a worker because the scheduler will never claim their campaign
+		// again: it is already cancelled or settled.
+		ctx, cancel = context.WithTimeout(r.ctx, time.Minute)
+		orphans, err := r.repo.CloseOrphanedTargets(ctx)
+		cancel()
+		if err != nil {
+			r.log.Error("close orphaned targets", "err", err)
+		} else if orphans > 0 {
+			r.log.Warn("closed recipients left mid-send by a finished campaign",
+				"count", orphans)
+		}
 	}
 }
 
