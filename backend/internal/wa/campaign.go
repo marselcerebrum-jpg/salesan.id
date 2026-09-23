@@ -81,6 +81,16 @@ func (m *Manager) PrepareCampaignMedia(
 		return nil, err
 	}
 
+	// A photo has to be a JPEG before it goes anywhere. WhatsApp's own clients
+	// transcode before sending, and a message built from WebP or PNG is
+	// accepted by the server and then cannot be drawn on a phone. See
+	// normaliseImage for the broadcast this cost us.
+	src, info, releaseConverted, err := normaliseImage(src, info)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseConverted()
+
 	// whatsmeow encrypts into a scratch file rather than memory, so a large
 	// video never has two full copies in RAM. Removed before this returns, on
 	// every path.

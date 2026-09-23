@@ -681,6 +681,17 @@ func (m *Manager) buildOutgoing(
 		return nil, err
 	}
 
+	// A photo has to reach WhatsApp as a JPEG or the phone cannot draw it. Only
+	// the copy going to WhatsApp is converted; the bucket keeps what the
+	// operator actually uploaded, so the chat screen still shows the original.
+	// See normaliseImage.
+	source, file, releaseConverted, err := normaliseImage(in.Source, in.File)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseConverted()
+	in.Source, in.File = source, file
+
 	// whatsmeow encrypts into a scratch file rather than memory, so a large
 	// video never has two full copies in RAM. Removed before this returns —
 	// including on the error paths.
