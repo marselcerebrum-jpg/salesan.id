@@ -550,19 +550,6 @@ function FromGroupPane({
                 — {numbers.length}/{reachable.length} dipilih
               </span>
             </p>
-            <button
-              type="button"
-              onClick={() =>
-                setMembers(
-                  numbers.length === reachable.length
-                    ? []
-                    : reachable.map((m) => m.phone_number as string),
-                )
-              }
-              className="text-xs font-medium text-brand-700 transition-colors hover:text-brand-800"
-            >
-              {numbers.length === reachable.length ? 'Kosongkan' : 'Pilih semua'}
-            </button>
           </div>
 
           <MemberList
@@ -601,10 +588,14 @@ function MemberList({
   });
 
   const unreachable = members.length - members.filter((m) => m.phone_number).length;
+  // Only the visible members who can actually be reached privately.
+  const shownReachable = shown
+    .map((m) => m.phone_number)
+    .filter((n): n is string => Boolean(n));
 
   return (
     <>
-      <label className="flex items-center gap-2 border-b border-hairline px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-hairline px-3 py-2">
         <Search className="size-3.5 shrink-0 text-ink-muted" />
         <input
           value={search}
@@ -613,7 +604,20 @@ function MemberList({
           aria-label="Cari anggota grup"
           className="w-full bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted"
         />
-      </label>
+        {/*
+          Beside the search, not above the list, because this button acts on
+          exactly what the search is showing. Members without a number cannot be
+          messaged privately, so they are never chosen even when they are on
+          screen.
+        */}
+        <button
+          type="button"
+          onClick={() => onChange(toggleShown(selected, shownReachable))}
+          className="shrink-0 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800"
+        >
+          {allShownChosen(selected, shownReachable) ? 'Kosongkan' : 'Pilih semua'}
+        </button>
+      </div>
 
       {loading ? (
         <p className="px-3 py-6 text-center text-xs text-ink-muted">Memuat anggota…</p>
@@ -690,7 +694,9 @@ function ToGroupPane({
 
   const needle = search.trim().toLowerCase();
   const shown = groups.rows.filter((g) => !needle || g.name.toLowerCase().includes(needle));
-  const allIDs = groups.rows
+  // The ids the button acts on are the ids on screen, which is what the search
+  // just narrowed them to.
+  const shownIDs = shown
     .map((g) => conversationFor(g, accountIDs))
     .filter((id): id is string => Boolean(id));
 
@@ -713,10 +719,10 @@ function ToGroupPane({
         </label>
         <button
           type="button"
-          onClick={() => onChange(selected.length === allIDs.length ? [] : allIDs)}
+          onClick={() => onChange(toggleShown(selected, shownIDs))}
           className="shrink-0 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800"
         >
-          {selected.length === allIDs.length && allIDs.length > 0 ? 'Kosongkan' : 'Pilih semua'}
+          {allShownChosen(selected, shownIDs) ? 'Kosongkan' : 'Pilih semua'}
         </button>
       </div>
 
@@ -900,12 +906,10 @@ function PickList({
         />
         <button
           type="button"
-          onClick={() =>
-            onChange(selected.length === rows.length ? [] : rows.map((r) => r.id))
-          }
+          onClick={() => onChange(toggleShown(selected, shown.map((r) => r.id)))}
           className="shrink-0 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800"
         >
-          {selected.length === rows.length && rows.length > 0 ? 'Kosongkan' : 'Pilih semua'}
+          {allShownChosen(selected, shown.map((r) => r.id)) ? 'Kosongkan' : 'Pilih semua'}
         </button>
       </div>
 
@@ -972,4 +976,37 @@ function conversationFor(g: GroupRow, accountIDs: string[]): string | null {
 
 function uniq<T>(items: T[]): T[] {
   return [...new Set(items)];
+}
+
+/**
+ * Whether everything the search is currently showing is already chosen.
+ *
+ * Asked of the visible rows, not of the whole list, so the button can say
+ * "Kosongkan" while a search is narrowing the view.
+ */
+function allShownChosen(selected: string[], shown: string[]): boolean {
+  if (shown.length === 0) return false;
+  const have = new Set(selected);
+  return shown.every((id) => have.has(id));
+}
+
+/**
+ * "Pilih semua" acts on what the search is showing, never on what it is hiding.
+ *
+ * It used to read the unfiltered list. Searching "CPNS" and pressing it put
+ * every group on the phone into the broadcast — sixty-seven of them — for a
+ * campaign meant to reach the six that matched. The count at the top said 67
+ * and looked like a feature working.
+ *
+ * Choosing adds to what is already chosen rather than replacing it, so two
+ * searches one after another keep both sets. Clearing removes only what is on
+ * screen, leaving anything chosen under an earlier search alone. Either way the
+ * operator can see exactly which rows the button is about to touch.
+ */
+function toggleShown(selected: string[], shown: string[]): string[] {
+  if (allShownChosen(selected, shown)) {
+    const drop = new Set(shown);
+    return selected.filter((id) => !drop.has(id));
+  }
+  return uniq([...selected, ...shown]);
 }
