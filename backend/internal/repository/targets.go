@@ -192,6 +192,29 @@ func (r *Repo) GroupMemberTargets(
 	return scanCandidates(rows, "group_member")
 }
 
+// ConversationIsArchived reports whether a thread sits in the archive folder.
+func (r *Repo) ConversationIsArchived(ctx context.Context, id uuid.UUID) (bool, error) {
+	var archived bool
+	err := r.pool.QueryRow(ctx,
+		`select is_archived from public.conversations where id = $1`, id).Scan(&archived)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return archived, nil
+}
+
+// SetConversationArchived records what WhatsApp has been told.
+//
+// Written after the app state patch is accepted, not before: WhatsApp is the
+// authority on where a chat lives, and app state sync would overwrite a guess
+// made here anyway.
+func (r *Repo) SetConversationArchived(ctx context.Context, id uuid.UUID, archived bool) error {
+	_, err := r.pool.Exec(ctx,
+		`update public.conversations set is_archived = $2, updated_at = now()
+		  where id = $1 and is_archived is distinct from $2`, id, archived)
+	return err
+}
+
 // LookupChats resolves raw JIDs against what each device already knows, so a
 // pasted number that is already a saved contact keeps its name and its thread.
 //

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -339,6 +340,39 @@ func (m *Manager) SendCampaignMessage(
 		return SendResult{WAMessageID: waMessageID}, err
 	}
 	return SendResult{WAMessageID: waMessageID, Timestamp: resp.Timestamp}, nil
+}
+
+// SurfaceChat takes a chat back out of the archive, on every device.
+//
+// A chat the operator archived stays archived when a new message arrives, as
+// long as "Keep chats archived" is on, which is the WhatsApp default. Two
+// thirds of the groups these numbers broadcast to sit in that folder, so a
+// broadcast that genuinely arrived was invisible on the sender's own phone.
+//
+// This is an app state patch, the same mechanism the phone itself uses, so the
+// change reaches the phone and every other linked device rather than only this
+// server's copy. Sending was never affected by archiving; only seeing was.
+//
+// Best effort by design: the message has already been delivered by the time
+// this runs, and failing to tidy the chat list is not a reason to call a
+// delivered message failed.
+func (m *Manager) SurfaceChat(ctx context.Context, accountID uuid.UUID, chatJID string) error {
+	s, ok := m.Session(accountID)
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if !s.IsConnected() {
+		return ErrNotConnected
+	}
+
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("jid tidak valid %q: %w", chatJID, err)
+	}
+
+	// Zero timestamp and no message key: whatsmeow documents both as optional,
+	// and the patch only has to say "not archived".
+	return s.client.SendAppState(ctx, appstate.BuildArchive(jid, false, time.Time{}, nil))
 }
 
 // ErrGroupAdminsOnly is WhatsApp refusing a group message with error 420:

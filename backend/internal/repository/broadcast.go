@@ -55,6 +55,10 @@ type SaveBroadcastInput struct {
 	DelayMaxSeconds  *int
 	// AutoRetryOnDisconnect keeps a disconnected number's share waiting for it.
 	AutoRetryOnDisconnect bool
+	// SurfaceOnPhone unarchives a chat once this campaign has delivered to it,
+	// so the message shows on the operator's phone rather than only in the
+	// archive folder. See migration 0067.
+	SurfaceOnPhone bool
 	// Recurrence is "daily", "weekly", "monthly", or empty for a single run.
 	Recurrence      string
 	RecurrenceUntil *time.Time
@@ -135,13 +139,13 @@ func (r *Repo) SaveBroadcast(
 			 delay_min_seconds, delay_max_seconds, auto_retry_on_disconnect,
 			 recurrence, recurrence_until,
 			 recurrence_time, recurrence_weekday, recurrence_day,
-			 media_storage_path, media_file_name)
+			 media_storage_path, media_file_name, surface_on_phone)
 		values ($1, $2, $3, $4::public.campaign_type, $5, $6,
 		        $7::public.campaign_status, $8, $9, $10, $11::public.operational_role, $12,
 		        $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
 		        $25, $26, $27, $28, $29,
 		        -- Stored as a bare wall clock; the scheduler reads it in Jakarta.
-		        nullif($30, '')::time, $31, $32, $33, $34)
+		        nullif($30, '')::time, $31, $32, $33, $34, $35)
 		returning id`,
 		workspaceID, in.ApplicationID, primary, in.CampaignType, in.Name, in.Template,
 		status, in.ScheduledAt, len(in.Targets), createdBy, role, picUser,
@@ -151,7 +155,7 @@ func (r *Repo) SaveBroadcast(
 		in.DelayMinSeconds, in.DelayMaxSeconds, in.AutoRetryOnDisconnect,
 		nullIfEmpty(in.Recurrence), in.RecurrenceUntil,
 		in.RecurrenceTime, in.RecurrenceWeekday, in.RecurrenceDay,
-		in.MediaStoragePath, in.MediaFileName,
+		in.MediaStoragePath, in.MediaFileName, in.SurfaceOnPhone,
 	).Scan(&id); err != nil {
 		return nil, err
 	}
@@ -454,10 +458,13 @@ type CampaignJob struct {
 	// come back. False abandons the share instead, which is what a time-bound
 	// promotion needs: finishing it six hours late is worse than not finishing.
 	AutoRetryOnDisconnect bool
-	MaxAttempts           int
-	RetryGapSeconds       int
-	CreatedBy             *uuid.UUID
-	AccountIDs            []uuid.UUID
+	// SurfaceOnPhone takes a delivered chat back out of the archive so the
+	// message shows up on the operator's own phone. See migration 0067.
+	SurfaceOnPhone  bool
+	MaxAttempts     int
+	RetryGapSeconds int
+	CreatedBy       *uuid.UUID
+	AccountIDs      []uuid.UUID
 }
 
 // DelayRange is the interval this job's pauses are drawn from: the operator's
@@ -513,7 +520,7 @@ func (r *Repo) ClaimDueCampaigns(
 		          cc.media_storage_path, cc.media_file_name,
 		          cc.caption, cc.delay_profile,
 		          cc.delay_min_seconds, cc.delay_max_seconds,
-		          cc.auto_retry_on_disconnect,
+		          cc.auto_retry_on_disconnect, cc.surface_on_phone,
 		          cc.max_attempts, cc.retry_gap_seconds, cc.created_by`,
 		owner, lease.Seconds(), limit)
 	if err != nil {
@@ -528,7 +535,7 @@ func (r *Repo) ClaimDueCampaigns(
 			&j.Name, &j.Template, &j.ComposeMode, &j.MediaURL, &j.MediaKind,
 			&j.MediaStoragePath, &j.MediaFileName, &j.Caption,
 			&j.DelayProfile, &j.DelayMinSeconds, &j.DelayMaxSeconds,
-			&j.AutoRetryOnDisconnect,
+			&j.AutoRetryOnDisconnect, &j.SurfaceOnPhone,
 			&j.MaxAttempts, &j.RetryGapSeconds, &j.CreatedBy); err != nil {
 			return nil, err
 		}

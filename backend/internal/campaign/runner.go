@@ -637,7 +637,54 @@ func (r *Runner) sendOne(
 	if err := r.repo.FinishAttemptSent(ctx, attemptID, t, waID, messageID, at); err != nil {
 		log.Error("record attempt sent", "err", err)
 	}
+	r.surfaceOnPhone(ctx, job, t)
 	r.publish(ctx, job)
+}
+
+// surfaceOnPhone takes a delivered chat back out of the archive.
+//
+// The message has arrived by the time this runs. What this fixes is not
+// delivery but visibility: with "Keep chats archived" on, which is WhatsApp's
+// default, an archived chat stays in the archive folder even when a new message
+// lands in it. Two thirds of the groups these numbers broadcast to are archived,
+// so the operator saw "Terkirim" in salesan, opened WhatsApp, and found nothing
+// on the front screen.
+//
+// Only chats this campaign actually delivered to are touched, and only when
+// they are archived. Archiving one again from the phone sticks until the next
+// campaign that asks for this.
+//
+// Best effort throughout. The message is already on the recipient's phone; a
+// chat list that stayed tidy is not a reason to call a delivered message
+// anything other than delivered.
+func (r *Runner) surfaceOnPhone(ctx context.Context, job repository.CampaignJob, t repository.QueuedTarget) {
+	if !job.SurfaceOnPhone || t.ConversationID == nil {
+		return
+	}
+	archived, err := r.repo.ConversationIsArchived(ctx, *t.ConversationID)
+	if err != nil {
+		r.log.Warn("read archive state", "conversation_id", *t.ConversationID, "err", err)
+		return
+	}
+	if !archived {
+		return
+	}
+
+	// Its own deadline: this is tidying, and it must not hold the number's
+	// queue behind an app state round trip that is going slowly.
+	surfaceCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	if err := r.wa.SurfaceChat(surfaceCtx, t.AccountID, t.ChatJID); err != nil {
+		r.log.Warn("surface chat on phone",
+			"campaign_id", job.ID, "chat_jid", t.ChatJID, "err", err)
+		return
+	}
+	if err := r.repo.SetConversationArchived(ctx, *t.ConversationID, false); err != nil {
+		r.log.Warn("record unarchive", "conversation_id", *t.ConversationID, "err", err)
+	}
+	r.log.Info("chat taken out of the archive so the broadcast shows on the phone",
+		"campaign_id", job.ID, "chat_jid", t.ChatJID)
 }
 
 // recordOutgoing writes the campaign message into the customer's thread.

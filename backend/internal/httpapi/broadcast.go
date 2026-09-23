@@ -58,6 +58,10 @@ type campaignRequest struct {
 	DelayMaxSeconds *int `json:"delay_max_seconds"`
 	// AutoRetryOnDisconnect defaults to true when the composer does not say.
 	AutoRetryOnDisconnect *bool `json:"auto_retry_on_disconnect"`
+	// SurfaceOnPhone takes a delivered chat out of the archive so the message
+	// shows on the sender's own phone. Defaults to true: a broadcast the
+	// sender cannot find is the complaint this exists to answer.
+	SurfaceOnPhone *bool `json:"surface_on_phone"`
 	// Recurrence is daily, weekly or monthly. Empty means one run.
 	Recurrence      string  `json:"recurrence"`
 	RecurrenceUntil *string `json:"recurrence_until"`
@@ -246,6 +250,11 @@ func (s *Server) buildCampaign(
 		autoRetry = *req.AutoRetryOnDisconnect
 	}
 
+	surface := true
+	if req.SurfaceOnPhone != nil {
+		surface = *req.SurfaceOnPhone
+	}
+
 	in := repository.SaveBroadcastInput{
 		CampaignType:          req.CampaignType,
 		Name:                  strings.TrimSpace(req.Name),
@@ -258,6 +267,7 @@ func (s *Server) buildCampaign(
 		DelayMinSeconds:       req.DelayMinSeconds,
 		DelayMaxSeconds:       req.DelayMaxSeconds,
 		AutoRetryOnDisconnect: autoRetry,
+		SurfaceOnPhone:        surface,
 		Recurrence:            req.Recurrence,
 		TargetSource:          req.TargetSource,
 	}
