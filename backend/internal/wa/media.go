@@ -492,7 +492,18 @@ func (m *Manager) SendMedia(ctx context.Context, in SendMediaInput) (*models.Mes
 	if err != nil {
 		return msg, nil // it went out; the receipt handler will correct the row
 	}
-	if list, err := m.repo.AttachmentsForMessage(ctx, msg.ID); err == nil {
+	// Read back in full rather than returning the row as written.
+	//
+	// The row carries the id of the message being answered; the quote bubble
+	// needs the name and the line of text behind it, and only this read joins
+	// them. Returning the bare row sent the browser a reply with quoted: null,
+	// so a photo answering a customer drew no quote until the operator left the
+	// conversation and came back, at which point the list query filled it in.
+	// The text path has always read back this way, which is why a typed reply
+	// showed its quote at once and a picture did not.
+	if full, err := m.repo.GetMessageByID(ctx, in.WorkspaceID, msg.ID); err == nil {
+		updated = full
+	} else if list, err := m.repo.AttachmentsForMessage(ctx, msg.ID); err == nil {
 		updated.Attachments = list
 	}
 

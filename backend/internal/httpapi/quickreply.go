@@ -358,6 +358,11 @@ func (s *Server) handleSendQuickReply(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ClientToken string  `json:"client_token"`
 		Caption     *string `json:"caption"`
+		// ReplyTo is the message this canned answer replies to, if any. It was
+		// missing, so a quick reply chosen while replying to a customer went out
+		// as a fresh message with no quote, and on a busy thread the customer
+		// could not tell what it answered.
+		ReplyTo *string `json:"reply_to"`
 	}
 	if err := decodeJSONOptional(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
@@ -391,6 +396,22 @@ func (s *Server) handleSendQuickReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolved the same way the ordinary media send resolves it, which is also
+	// what refuses a quote of a message from another thread.
+	var replyTo *repository.MessageTarget
+	if req.ReplyTo != nil && strings.TrimSpace(*req.ReplyTo) != "" {
+		replyID, ok := parseUUIDParam(w, strings.TrimSpace(*req.ReplyTo), "reply_to")
+		if !ok {
+			return
+		}
+		target, err := s.manager.ReplyTarget(r.Context(), user.WorkspaceID, conversationID, replyID)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		replyTo = target
+	}
+
 	msg, err := s.manager.SendMedia(r.Context(), wa.SendMediaInput{
 		WorkspaceID:    user.WorkspaceID,
 		ConversationID: conversationID,
@@ -399,6 +420,7 @@ func (s *Server) handleSendQuickReply(w http.ResponseWriter, r *http.Request) {
 		Caption:        caption,
 		ClientToken:    req.ClientToken,
 		Source:         res.File,
+		ReplyTo:        replyTo,
 	})
 	if err != nil {
 		if msg != nil {

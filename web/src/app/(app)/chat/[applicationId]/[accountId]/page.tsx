@@ -709,11 +709,21 @@ function Inbox() {
    *
    * The client token is what stops a double press from sending twice.
    */
-  async function handleSendQuickReply(reply: QuickReply, caption: string) {
+  async function handleSendQuickReply(
+    reply: QuickReply,
+    caption: string,
+    replyTo: string | null,
+  ) {
     if (!selected) return;
     setError(null);
     try {
-      const result = await sendQuickReply(selected.id, reply.id, crypto.randomUUID(), caption);
+      const result = await sendQuickReply(
+        selected.id,
+        reply.id,
+        crypto.randomUUID(),
+        caption,
+        replyTo,
+      );
       setMessages((prev) =>
         prev.some((m) => m.id === result.message.id)
           ? prev.map((m) => (m.id === result.message.id ? result.message : m))

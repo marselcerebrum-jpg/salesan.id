@@ -83,7 +83,11 @@ interface MessageThreadProps {
    * and edited before it goes. The image is fetched server-side from the
    * address stored on the reply, so nothing about it passes through here.
    */
-  onSendQuickReply: (reply: QuickReply, caption: string) => Promise<void>;
+  onSendQuickReply: (
+    reply: QuickReply,
+    caption: string,
+    replyTo: string | null,
+  ) => Promise<void>;
   /** Sends one attached file; the composer drives progress and retry. */
   onSendFile: (
     draft: SendDraft,
@@ -447,10 +451,14 @@ export function MessageThread({
     // That is why this is checked before the empty-draft guard below.
     if (pendingPicture) {
       const reply = pendingPicture;
+      // Read before the state is cleared. Clearing first is what sent a canned
+      // picture as a fresh message while the operator had a customer's message
+      // selected to answer, leaving the customer with no idea what it replied to.
+      const quoted = replyTo?.id ?? null;
       setPendingPicture(null);
       setDraft('');
       setReplyTo(null);
-      void onSendQuickReply(reply, body);
+      void onSendQuickReply(reply, body, quoted);
       return;
     }
 

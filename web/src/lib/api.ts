@@ -1583,10 +1583,23 @@ export const sendQuickReply = (
    * string is a real choice: a picture with no words.
    */
   caption: string,
+  /**
+   * The message this canned answer replies to, when the operator picked one
+   * before reaching for the reply. Without it the picture went out as a fresh
+   * message and the customer could not tell what it answered.
+   */
+  replyTo?: string | null,
 ) =>
   request<{ message: Message; error?: string; detail?: string }>(
     `/conversations/${conversationId}/quick-replies/${quickReplyId}`,
-    { method: 'POST', body: JSON.stringify({ client_token: clientToken, caption }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        client_token: clientToken,
+        caption,
+        reply_to: replyTo ?? null,
+      }),
+    },
   );
 
 /* --- SLA targets ---------------------------------------------------------- */
