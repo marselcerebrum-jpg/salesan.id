@@ -6,7 +6,9 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/salesan/omnichannel/backend/internal/media"
@@ -134,5 +136,77 @@ func TestUndecodableImageIsStillSent(t *testing.T) {
 
 	if out != src || info != in {
 		t.Error("an undecodable image must be passed through, not dropped")
+	}
+}
+
+// A Story publishes its numbers in parallel, and every one of them prepares the
+// same fetched file. They must not share a file handle: one *os.File carries one
+// offset, so a Seek(0) in one goroutine rewinds the read another is in the
+// middle of, and both upload a mixture of two reads. It reached a phone as
+// coloured noise with the caption intact underneath.
+//
+// This pins the safe arrangement: separate handles on one file, prepared at the
+// same time, produce byte-identical output.
+func TestConcurrentPreparationFromSeparateHandlesIsIdentical(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, squareImage()); err != nil {
+		t.Fatal(err)
+	}
+	shared := writeTemp(t, "poster-*.png", buf.Bytes())
+	in := media.File{
+		Kind: media.KindImage, MIME: "image/png", Name: "poster.png", Ext: ".png",
+		Size: int64(buf.Len()),
+	}
+
+	const workers = 8
+	results := make([][]byte, workers)
+	errs := make([]error, workers)
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+
+			// What PrepareCampaignMedia does: its own handle, nobody else's offset.
+			own, err := os.Open(shared.Name())
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer own.Close()
+
+			out, _, cleanup, err := normaliseImage(own, in)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer cleanup()
+
+			data, err := io.ReadAll(out)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			results[i] = data
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("worker %d: %v", i, err)
+		}
+	}
+	for i, got := range results {
+		if len(got) == 0 {
+			t.Fatalf("worker %d produced nothing", i)
+		}
+		if !bytes.Equal(got, results[0]) {
+			t.Errorf("worker %d produced different bytes; the readers are interfering", i)
+		}
+		if _, err := jpeg.Decode(bytes.NewReader(got)); err != nil {
+			t.Errorf("worker %d produced something that is not a JPEG: %v", i, err)
+		}
 	}
 }

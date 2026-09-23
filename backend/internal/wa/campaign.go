@@ -77,6 +77,32 @@ func (m *Manager) PrepareCampaignMedia(
 		return nil, ErrNotConnected
 	}
 
+	// Each caller reads from its own handle on the file.
+	//
+	// One *os.File carries one file offset, and a Story publishes its numbers
+	// in parallel: several goroutines seek and read the same handle at the same
+	// time, so one goroutine's Seek(0) rewinds the offset another is halfway
+	// through. Each then uploads a mixture of two reads.
+	//
+	// That is not a corrupted upload in theory. It reached a phone as a picture
+	// of coloured noise with the caption intact underneath it, which is exactly
+	// what a JPEG stitched from two interleaved reads looks like.
+	//
+	// os.Open gives this call an offset nobody else moves. Failing to get one is
+	// an error rather than a fallback to the shared handle: sending a picture we
+	// know may be scrambled, to every contact of a number, is worse than not
+	// sending it.
+	name := src.Name()
+	if name == "" {
+		return nil, fmt.Errorf("berkas media tidak punya nama, tidak bisa dibaca dengan aman")
+	}
+	own, err := os.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("buka salinan berkas media: %w", err)
+	}
+	defer own.Close()
+	src = own
+
 	if _, err := src.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
