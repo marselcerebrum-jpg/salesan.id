@@ -59,7 +59,25 @@ func (r *Repo) ListStatusPosts(
 	ctx context.Context, workspaceID, accountID uuid.UUID,
 ) ([]StatusPost, error) {
 	rows, err := r.pool.Query(ctx, `
-		select m.id, coalesce(m.participant_jid, m.sender_jid, ''),
+		select m.id,
+		       -- Our own Status is reported under one address, always.
+		       --
+		       -- WhatsApp calls the same number two things, its phone number and
+		       -- its LID, and it does not pick one for a Status we posted: some
+		       -- carry the number, some carry the LID, and which one depends on
+		       -- how the post was addressed at the time. The list groups by this
+		       -- field, so one number's own updates split into two rows, both
+		       -- labelled "Status Saya", one reading 4 update and the other 3.
+		       --
+		       -- Other people are left exactly as they arrived. This is not a
+		       -- general merge of the two addresses; it only says that the number
+		       -- reading its own list is one person.
+		       case when m.from_me
+		            then coalesce(nullif(btrim(own.jid), ''),
+		                          own.phone_number || '@s.whatsapp.net',
+		                          coalesce(m.participant_jid, m.sender_jid, ''))
+		            else coalesce(m.participant_jid, m.sender_jid, '')
+		       end,
 		       coalesce(
 		         nullif(btrim(ct.name), ''),
 		         nullif(btrim(ct.push_name), ''),
@@ -80,6 +98,7 @@ func (r *Repo) ListStatusPosts(
 		       coalesce(vc.viewers, 0)
 		  from public.messages m
 		  join public.conversations c on c.id = m.conversation_id
+		  join public.whatsapp_accounts own on own.id = c.account_id
 		  left join public.status_view_counts vc
 		         on vc.account_id = m.account_id
 		        and vc.wa_message_id = m.wa_message_id
