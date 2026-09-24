@@ -18,16 +18,25 @@ import (
 // StoryFont is the name of one of the fonts WhatsApp offers for a text status.
 type StoryFont = string
 
-// The fonts WhatsApp itself offers. Kept in the order the composer shows them,
-// which is the order the phone shows them in too.
+// Every font WhatsApp's protocol has, in the order the composer shows them.
+// There are eight and no more: the enum WhatsApp defines has eight members, so
+// this list is complete rather than a selection, and it cannot grow until
+// WhatsApp itself adds one.
+//
+// The stored names are frozen. A campaign written months ago carries its name
+// into the future, so "serif" keeps meaning the typewriter face even though the
+// face is not a serif in the typographic sense. Renaming one here would quietly
+// send an old campaign in the wrong letters.
 const (
-	StoryFontDefault          StoryFont = ""
-	StoryFontSystem           StoryFont = "system"
-	StoryFontSerif            StoryFont = "serif"
-	StoryFontNoricanRegular   StoryFont = "script"
-	StoryFontBryndanWrite     StoryFont = "handwriting"
-	StoryFontBebasNeueRegular StoryFont = "condensed"
-	StoryFontOswaldHeavy      StoryFont = "heavy"
+	StoryFontDefault     StoryFont = ""
+	StoryFontSystem      StoryFont = "system"
+	StoryFontSystemText  StoryFont = "system-text"
+	StoryFontSystemBold  StoryFont = "system-bold"
+	StoryFontTypewriter  StoryFont = "serif"
+	StoryFontScript      StoryFont = "script"
+	StoryFontHandwriting StoryFont = "handwriting"
+	StoryFontCondensed   StoryFont = "condensed"
+	StoryFontRounded     StoryFont = "heavy"
 )
 
 // storyFonts maps a stored name to the enum sent on the wire.
@@ -36,12 +45,14 @@ const (
 // carrying a name this build no longer knows should do: send, in the ordinary
 // font, rather than fail.
 var storyFonts = map[StoryFont]waE2E.ExtendedTextMessage_FontType{
-	StoryFontSystem:           waE2E.ExtendedTextMessage_SYSTEM,
-	StoryFontSerif:            waE2E.ExtendedTextMessage_COURIERPRIME_BOLD,
-	StoryFontNoricanRegular:   waE2E.ExtendedTextMessage_FB_SCRIPT,
-	StoryFontBryndanWrite:     waE2E.ExtendedTextMessage_MORNINGBREEZE_REGULAR,
-	StoryFontBebasNeueRegular: waE2E.ExtendedTextMessage_EXO2_EXTRABOLD,
-	StoryFontOswaldHeavy:      waE2E.ExtendedTextMessage_CALISTOGA_REGULAR,
+	StoryFontSystem:      waE2E.ExtendedTextMessage_SYSTEM,
+	StoryFontSystemText:  waE2E.ExtendedTextMessage_SYSTEM_TEXT,
+	StoryFontSystemBold:  waE2E.ExtendedTextMessage_SYSTEM_BOLD,
+	StoryFontTypewriter:  waE2E.ExtendedTextMessage_COURIERPRIME_BOLD,
+	StoryFontScript:      waE2E.ExtendedTextMessage_FB_SCRIPT,
+	StoryFontHandwriting: waE2E.ExtendedTextMessage_MORNINGBREEZE_REGULAR,
+	StoryFontCondensed:   waE2E.ExtendedTextMessage_EXO2_EXTRABOLD,
+	StoryFontRounded:     waE2E.ExtendedTextMessage_CALISTOGA_REGULAR,
 }
 
 // StoryFontNames is every font the composer may offer, for validation.

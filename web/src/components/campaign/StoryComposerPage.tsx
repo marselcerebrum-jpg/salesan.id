@@ -18,6 +18,7 @@ import { SenderStep } from '@/components/campaign/SenderStep';
 import { StoryPreview } from '@/components/campaign/StoryPreview';
 import {
   STORY_COLOURS,
+  APPROXIMATE_FONTS,
   STORY_FONTS,
   type StoryColourOption,
   type StoryFontOption,
@@ -337,7 +338,7 @@ export function StoryComposerPage({
                         type="button"
                         onClick={() => setFont(f)}
                         aria-pressed={font.id === f.id}
-                        style={{ fontFamily: f.css }}
+                        style={{ fontFamily: f.css, fontWeight: f.weight }}
                         className={clsx(
                           'h-10 rounded-control border text-sm transition-colors',
                           font.id === f.id
@@ -350,15 +351,16 @@ export function StoryComposerPage({
                     ))}
                   </div>
                   {/*
-                    Said plainly rather than left to be discovered: these are
-                    WhatsApp's typefaces, not ours to ship, so the preview
-                    reaches for the nearest thing this machine already has. The
-                    choice that travels is the right one; only the drawing here
-                    is approximate.
+                    Named rather than left as a blanket warning. Six of the
+                    eight previews are the letters that will be sent; saying
+                    otherwise would make someone distrust a preview that is
+                    telling the truth. The two that are stand-ins are WhatsApp's
+                    own typefaces, which are not ours to ship.
                   */}
                   <p className="mt-1.5 text-2xs text-ink-muted">
-                    Bentuk huruf di pratinjau hanya pendekatan. Yang dikirim ke
-                    WhatsApp adalah font aslinya.
+                    {APPROXIMATE_FONTS.map((f) => f.label).join(' dan ')} di
+                    pratinjau hanya pendekatan; yang dikirim ke WhatsApp adalah
+                    font aslinya. Sisanya sudah sesuai.
                   </p>
                 </Field>
               </>
@@ -464,6 +466,7 @@ export function StoryComposerPage({
               senderName={chosen[0]?.label ?? chosen[0]?.name ?? null}
               background={kind === 'text' ? colour.hex : null}
               fontCSS={kind === 'text' ? font.css : null}
+              fontWeight={kind === 'text' ? font.weight : null}
               variables={[]}
               values={{}}
             />

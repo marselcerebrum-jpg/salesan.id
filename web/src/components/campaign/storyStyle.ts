@@ -4,35 +4,71 @@
  * Both travel inside the message WhatsApp delivers, so these are not preview
  * settings. Everyone who opens the status sees what was chosen here.
  *
- * The names are the contract with the server, which translates them into
+ * The ids are the contract with the server, which translates them into
  * WhatsApp's own enum at send time. Adding one here without adding it there
  * means a Story that is refused on submit, so the two lists are checked against
  * each other by a test on the server side.
  */
 
+import { Calistoga, Caveat, Courier_Prime, Exo_2, Norican } from 'next/font/google';
+
+/*
+ * Three of WhatsApp's faces are published under an open licence, so the preview
+ * can draw the real thing rather than guess at it. They are fetched when the
+ * site is built and served from our own domain, which keeps the reader's
+ * browser from announcing itself to a font host on every visit.
+ *
+ * The other two are not ours to ship. What stands in for them is chosen to be
+ * the same kind of letter and, more importantly, to exist everywhere: the
+ * previous stand-ins were fonts installed on Windows, which meant a phone
+ * browser drew two different choices with the same default letters and the
+ * picker looked broken.
+ */
+const typewriter = Courier_Prime({ subsets: ['latin'], weight: '700' });
+const condensed = Exo_2({ subsets: ['latin'], weight: '800' });
+const rounded = Calistoga({ subsets: ['latin'], weight: '400' });
+const script = Norican({ subsets: ['latin'], weight: '400' });
+const handwriting = Caveat({ subsets: ['latin'], weight: '700' });
+
 export interface StoryFontOption {
-  /** What the server stores and translates. */
+  /** What the server stores and translates. Frozen: old campaigns carry it. */
   id: string;
   /** What the composer calls it. */
   label: string;
-  /**
-   * What the preview draws it with.
-   *
-   * An approximation on purpose. These are WhatsApp's own typefaces and are
-   * not ours to ship, so the preview reaches for the nearest thing the reader
-   * already has. It shows which choice is which, not what the pixels will be.
-   */
+  /** What the preview draws it with. */
   css: string;
+  /** Only where the face needs one; the plain weight is left alone. */
+  weight?: number;
+  /**
+   * Whether the preview shows the letters that will actually be sent.
+   *
+   * Recorded per font rather than stated once for all of them, because it is
+   * true of six of the eight, and telling someone their preview is
+   * approximate when it is exact is its own kind of wrong.
+   */
+  exact: boolean;
 }
 
+/**
+ * Every font WhatsApp has, in the order the composer shows them.
+ *
+ * Eight, and not a shortlist of eight: WhatsApp's protocol defines exactly this
+ * many. The first three are the phone's own letters in three weights, so they
+ * are exact by definition, whatever font the phone happens to use.
+ */
 export const STORY_FONTS: StoryFontOption[] = [
-  { id: 'system', label: 'Biasa', css: 'system-ui, sans-serif' },
-  { id: 'serif', label: 'Mesin Tik', css: '"Courier New", ui-monospace, monospace' },
-  { id: 'script', label: 'Sambung', css: '"Brush Script MT", cursive' },
-  { id: 'handwriting', label: 'Tulisan Tangan', css: '"Segoe Script", "Bradley Hand", cursive' },
-  { id: 'condensed', label: 'Tebal Rapat', css: '"Arial Narrow", "Haettenschweiler", sans-serif' },
-  { id: 'heavy', label: 'Tebal Bulat', css: 'Georgia, "Times New Roman", serif' },
+  { id: 'system', label: 'Biasa', css: 'system-ui, sans-serif', exact: true },
+  { id: 'system-text', label: 'Polos', css: 'system-ui, sans-serif', weight: 400, exact: true },
+  { id: 'system-bold', label: 'Tebal', css: 'system-ui, sans-serif', weight: 700, exact: true },
+  { id: 'serif', label: 'Mesin Tik', css: typewriter.style.fontFamily, weight: 700, exact: true },
+  { id: 'condensed', label: 'Tebal Rapat', css: condensed.style.fontFamily, weight: 800, exact: true },
+  { id: 'heavy', label: 'Tebal Bulat', css: rounded.style.fontFamily, exact: true },
+  { id: 'script', label: 'Sambung', css: script.style.fontFamily, exact: false },
+  { id: 'handwriting', label: 'Tulisan Tangan', css: handwriting.style.fontFamily, weight: 700, exact: false },
 ];
+
+/** The fonts whose preview is a stand-in, for the note under the picker. */
+export const APPROXIMATE_FONTS = STORY_FONTS.filter((f) => !f.exact);
 
 export interface StoryColourOption {
   label: string;
@@ -61,13 +97,3 @@ export const STORY_COLOURS: StoryColourOption[] = [
   { label: 'Abu Gelap', hex: '#3B4A54', argb: 0xff3b4a54 },
   { label: 'Hitam', hex: '#111B21', argb: 0xff111b21 },
 ];
-
-/** The swatch a stored colour belongs to, or the first one when none is set. */
-export function colourFor(argb: number | null | undefined): StoryColourOption {
-  return STORY_COLOURS.find((c) => c.argb === argb) ?? STORY_COLOURS[0];
-}
-
-/** The font a stored id belongs to, or the plain one when none is set. */
-export function fontFor(id: string | null | undefined): StoryFontOption {
-  return STORY_FONTS.find((f) => f.id === id) ?? STORY_FONTS[0];
-}

@@ -33,6 +33,7 @@ export function StoryPreview({
   senderName,
   background,
   fontCSS,
+  fontWeight,
   variables,
   values,
 }: {
@@ -45,11 +46,13 @@ export function StoryPreview({
   /**
    * How to draw the chosen typeface here.
    *
-   * An approximation, and named so it cannot be mistaken for the thing being
-   * sent: WhatsApp's own faces are not ours to ship, so this reaches for the
-   * nearest one the reader already has.
+   * Exact for most of the choices, since those faces are published under an
+   * open licence and shipped with the site. For the two that are not, this is
+   * a stand-in of the same kind, and the composer says which two.
    */
   fontCSS?: string | null;
+  /** Only where the face needs one; see the note on the weight below. */
+  fontWeight?: number | null;
   variables: CustomVariable[];
   values: Record<string, string>;
 }) {
@@ -160,7 +163,14 @@ export function StoryPreview({
             >
               {rendered ? (
                 <p
-                  style={fontCSS ? { fontFamily: fontCSS } : undefined}
+                  /*
+                    The weight is stated whenever a face is chosen, rather than
+                    left to the class below. A display face like the rounded one
+                    ships in one weight only, and asking a browser for a heavier
+                    one makes it smear the letters into a bold that the font
+                    does not have and WhatsApp will not send.
+                  */
+                  style={fontCSS ? { fontFamily: fontCSS, fontWeight: fontWeight ?? 400 } : undefined}
                   className="max-h-full overflow-hidden text-center text-lg leading-snug font-medium break-words whitespace-pre-wrap text-white"
                 >
                   <Formatted text={rendered} />

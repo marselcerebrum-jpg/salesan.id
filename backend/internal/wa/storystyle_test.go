@@ -1,6 +1,10 @@
 package wa
 
-import "testing"
+import (
+	"testing"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
+)
 
 // The font travels inside the message, so a name this build cannot resolve must
 // leave the field out rather than send the enum's zero value. Zero means SYSTEM
@@ -17,7 +21,7 @@ func TestUnknownFontIsLeftOutRatherThanSentAsZero(t *testing.T) {
 
 func TestChosenFontAndColourReachTheMessage(t *testing.T) {
 	const teal = 0xFF075E54
-	msg, err := StoryMessage("halo", nil, teal, StoryFontSerif)
+	msg, err := StoryMessage("halo", nil, teal, StoryFontTypewriter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +71,25 @@ func TestValidationAcceptsEveryFontTheComposerOffers(t *testing.T) {
 	for _, argb := range []int64{-1, 0x1_0000_0000} {
 		if ValidStoryBackground(argb) {
 			t.Errorf("%#x does not fit the field and must be refused", argb)
+		}
+	}
+}
+
+// The composer claims to offer every font WhatsApp has. That claim is only true
+// as long as this list matches the protocol's own, so the protocol is asked
+// rather than trusted: if WhatsApp adds a font, this fails and says which one,
+// instead of the choice quietly never reaching the screen.
+func TestEveryFontWhatsAppDefinesIsOffered(t *testing.T) {
+	sent := make(map[waE2E.ExtendedTextMessage_FontType]StoryFont, len(storyFonts))
+	for name, font := range storyFonts {
+		if other, clash := sent[font]; clash {
+			t.Errorf("%q and %q both send %v; one of them is unreachable", name, other, font)
+		}
+		sent[font] = name
+	}
+	for value, label := range waE2E.ExtendedTextMessage_FontType_name {
+		if _, offered := sent[waE2E.ExtendedTextMessage_FontType(value)]; !offered {
+			t.Errorf("WhatsApp has %s but the composer cannot choose it", label)
 		}
 	}
 }
