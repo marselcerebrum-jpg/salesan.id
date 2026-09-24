@@ -483,14 +483,17 @@ function Thumb({
           type="button"
           onClick={onRemove}
           aria-label={`Hapus ${draft.name}`}
-          className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          // Revealed by hover where there is a pointer, always present where
+          // there is not: on a phone the only way to drop an attachment is to
+          // see the button, and a finger cannot hover to summon it.
+          className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-black/60 text-white opacity-0 transition-opacity pointer-fine:group-hover:opacity-100 pointer-coarse:opacity-100 focus-visible:opacity-100"
         >
           <Trash2 className="size-3" />
         </button>
       ) : null}
 
       {onMove ? (
-        <span className="absolute inset-x-0 bottom-0 flex justify-between opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <span className="absolute inset-x-0 bottom-0 flex justify-between opacity-0 transition-opacity pointer-fine:group-hover:opacity-100 pointer-coarse:opacity-100 focus-within:opacity-100">
           <button
             type="button"
             onClick={() => onMove(-1)}

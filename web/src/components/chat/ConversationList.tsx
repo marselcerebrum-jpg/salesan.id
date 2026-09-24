@@ -483,7 +483,9 @@ function ConversationRow({
             </span>
           </span>
 
-          <span className="mt-[2px] flex items-center justify-between gap-2">
+          {/* Room on the right for the chevron, but only where the chevron is
+              always there: on a touch screen it cannot wait for a hover. */}
+          <span className="mt-[2px] flex items-center justify-between gap-2 pointer-coarse:pr-7">
             <span className="flex min-w-0 items-center gap-1 truncate text-xs text-wa-text-2">
               {/* Shown ahead of the preview rather than instead of it: the
                   operator needs to know they were named *and* what about. */}
@@ -494,12 +496,17 @@ function ConversationRow({
                 {previewText(conversation.last_message_text, conversation.last_message_direction)}
               </span>
             </span>
-            {/* The badge yields to the chevron on hover — the two want the same
-                spot, and only one of them is useful at a time. */}
+            {/* The badge yields to the chevron on hover, because the two want
+                the same spot and only one of them is useful at a time.
+                
+                Only where there is a pointer to hover with. A touch screen has
+                none, so the fade would never come back and the badge would be
+                the only thing ever shown; on touch the chevron is given its own
+                room above instead, and both stay. */}
             <span
               className={clsx(
                 'shrink-0 transition-opacity',
-                menuAt ? 'opacity-0' : 'group-hover:opacity-0',
+                menuAt ? 'opacity-0' : 'pointer-fine:group-hover:opacity-0',
               )}
             >
               {conversation.mention_count > 0 ? (
@@ -556,7 +563,14 @@ function ConversationRow({
         className={clsx(
           'absolute top-[30px] right-2 grid size-6 place-items-center rounded-md text-ink-muted transition-opacity',
           'hover:bg-hairline/70 hover:text-ink focus-visible:opacity-100',
-          menuAt ? 'bg-hairline/70 text-ink opacity-100' : 'opacity-0 group-hover:opacity-100',
+          menuAt
+            ? 'bg-hairline/70 text-ink opacity-100'
+            : // Revealed by hover where there is a pointer, and simply present
+              // where there is not. Waiting for a hover that a finger can never
+              // perform is what took "tandai belum dibaca", "bersihkan isi
+              // chat", "hapus obrolan" and the labels off the phone entirely:
+              // the menu was there the whole time with no way to open it.
+              'opacity-0 pointer-fine:group-hover:opacity-100 pointer-coarse:opacity-100',
         )}
       >
         <ChevronDown className="size-4" />
