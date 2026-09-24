@@ -1232,7 +1232,8 @@ func (r *Runner) publishStory(
 		return
 	}
 
-	msg, err := wa.StoryMessage(built.Body, prepared, 0)
+	msg, err := wa.StoryMessage(
+		built.Body, prepared, uint32(job.StoryBackgroundARGB), job.StoryFont)
 	if err != nil {
 		if _, e := r.repo.MarkStoryFailed(ctx, p.ID, p.Attempt, job.MaxAttempts,
 			job.RetryGapSeconds, "pesan", err.Error()); e != nil {

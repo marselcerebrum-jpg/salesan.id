@@ -59,6 +59,11 @@ type SaveBroadcastInput struct {
 	// so the message shows on the operator's phone rather than only in the
 	// archive folder. See migration 0067.
 	SurfaceOnPhone bool
+	// StoryBackgroundARGB and StoryFont style a text Story. Both travel inside
+	// the message WhatsApp delivers, so every viewer sees the choice. Zero and
+	// empty mean WhatsApp's own defaults. See migration 0069.
+	StoryBackgroundARGB int64
+	StoryFont           string
 	// Recurrence is "daily", "weekly", "monthly", or empty for a single run.
 	Recurrence      string
 	RecurrenceUntil *time.Time
@@ -139,13 +144,15 @@ func (r *Repo) SaveBroadcast(
 			 delay_min_seconds, delay_max_seconds, auto_retry_on_disconnect,
 			 recurrence, recurrence_until,
 			 recurrence_time, recurrence_weekday, recurrence_day,
-			 media_storage_path, media_file_name, surface_on_phone)
+			 media_storage_path, media_file_name, surface_on_phone,
+			 story_background_argb, story_font)
 		values ($1, $2, $3, $4::public.campaign_type, $5, $6,
 		        $7::public.campaign_status, $8, $9, $10, $11::public.operational_role, $12,
 		        $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
 		        $25, $26, $27, $28, $29,
 		        -- Stored as a bare wall clock; the scheduler reads it in Jakarta.
-		        nullif($30, '')::time, $31, $32, $33, $34, $35)
+		        nullif($30, '')::time, $31, $32, $33, $34, $35,
+		        nullif($36, 0), nullif($37, ''))
 		returning id`,
 		workspaceID, in.ApplicationID, primary, in.CampaignType, in.Name, in.Template,
 		status, in.ScheduledAt, len(in.Targets), createdBy, role, picUser,
@@ -156,6 +163,7 @@ func (r *Repo) SaveBroadcast(
 		nullIfEmpty(in.Recurrence), in.RecurrenceUntil,
 		in.RecurrenceTime, in.RecurrenceWeekday, in.RecurrenceDay,
 		in.MediaStoragePath, in.MediaFileName, in.SurfaceOnPhone,
+		in.StoryBackgroundARGB, in.StoryFont,
 	).Scan(&id); err != nil {
 		return nil, err
 	}
@@ -460,11 +468,14 @@ type CampaignJob struct {
 	AutoRetryOnDisconnect bool
 	// SurfaceOnPhone takes a delivered chat back out of the archive so the
 	// message shows up on the operator's own phone. See migration 0067.
-	SurfaceOnPhone  bool
-	MaxAttempts     int
-	RetryGapSeconds int
-	CreatedBy       *uuid.UUID
-	AccountIDs      []uuid.UUID
+	SurfaceOnPhone bool
+	// StoryBackgroundARGB and StoryFont style a text Story. See migration 0069.
+	StoryBackgroundARGB int64
+	StoryFont           string
+	MaxAttempts         int
+	RetryGapSeconds     int
+	CreatedBy           *uuid.UUID
+	AccountIDs          []uuid.UUID
 }
 
 // DelayRange is the interval this job's pauses are drawn from: the operator's
@@ -521,6 +532,7 @@ func (r *Repo) ClaimDueCampaigns(
 		          cc.caption, cc.delay_profile,
 		          cc.delay_min_seconds, cc.delay_max_seconds,
 		          cc.auto_retry_on_disconnect, cc.surface_on_phone,
+		          coalesce(cc.story_background_argb, 0), coalesce(cc.story_font, ''),
 		          cc.max_attempts, cc.retry_gap_seconds, cc.created_by`,
 		owner, lease.Seconds(), limit)
 	if err != nil {
@@ -536,6 +548,7 @@ func (r *Repo) ClaimDueCampaigns(
 			&j.MediaStoragePath, &j.MediaFileName, &j.Caption,
 			&j.DelayProfile, &j.DelayMinSeconds, &j.DelayMaxSeconds,
 			&j.AutoRetryOnDisconnect, &j.SurfaceOnPhone,
+			&j.StoryBackgroundARGB, &j.StoryFont,
 			&j.MaxAttempts, &j.RetryGapSeconds, &j.CreatedBy); err != nil {
 			return nil, err
 		}

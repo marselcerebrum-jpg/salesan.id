@@ -31,6 +31,8 @@ export function StoryPreview({
   mediaKind,
   mediaURL,
   senderName,
+  background,
+  fontCSS,
   variables,
   values,
 }: {
@@ -38,6 +40,16 @@ export function StoryPreview({
   mediaKind: MediaKind | null;
   mediaURL: string;
   senderName: string | null;
+  /** The chosen backdrop for a text Story, or null to draw WhatsApp's own. */
+  background?: string | null;
+  /**
+   * How to draw the chosen typeface here.
+   *
+   * An approximation, and named so it cannot be mistaken for the thing being
+   * sent: WhatsApp's own faces are not ours to ship, so this reaches for the
+   * nearest one the reader already has.
+   */
+  fontCSS?: string | null;
   variables: CustomVariable[];
   values: Record<string, string>;
 }) {
@@ -135,15 +147,22 @@ export function StoryPreview({
             />
           ) : (
             /*
-             * Text-only status, on WhatsApp's own dark teal.
+             * Text-only status, on the colour that will actually be published.
              *
-             * The exact colour the backend publishes with — defaultStoryBackground
-             * in wa/campaign.go is 0xFF075E54 — so the preview and the published
-             * status are the same screen, not two guesses at it.
+             * Falls back to WhatsApp's own dark teal, which is the same value
+             * the backend falls back to — defaultStoryBackground in
+             * wa/campaign.go is 0xFF075E54 — so a Story with no colour chosen
+             * previews as the screen it will become rather than a guess at it.
              */
-            <div className="absolute inset-0 grid place-items-center bg-[#075E54] px-6">
+            <div
+              style={{ backgroundColor: background ?? '#075E54' }}
+              className="absolute inset-0 grid place-items-center px-6"
+            >
               {rendered ? (
-                <p className="max-h-full overflow-hidden text-center text-lg leading-snug font-medium break-words whitespace-pre-wrap text-white">
+                <p
+                  style={fontCSS ? { fontFamily: fontCSS } : undefined}
+                  className="max-h-full overflow-hidden text-center text-lg leading-snug font-medium break-words whitespace-pre-wrap text-white"
+                >
                   <Formatted text={rendered} />
                 </p>
               ) : (

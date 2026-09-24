@@ -284,7 +284,12 @@ func CampaignMessage(text string, prepared *PreparedMedia) (*waE2E.Message, erro
 // A text-only Story is an ExtendedTextMessage carrying a background colour,
 // which is what WhatsApp itself produces for a written status; a bare
 // Conversation string is not rendered as a status by the clients.
-func StoryMessage(text string, prepared *PreparedMedia, backgroundARGB uint32) (*waE2E.Message, error) {
+func StoryMessage(
+	text string,
+	prepared *PreparedMedia,
+	backgroundARGB uint32,
+	font StoryFont,
+) (*waE2E.Message, error) {
 	if prepared == nil {
 		if text == "" {
 			return nil, ErrEmptyMessage
@@ -292,10 +297,17 @@ func StoryMessage(text string, prepared *PreparedMedia, backgroundARGB uint32) (
 		if backgroundARGB == 0 {
 			backgroundARGB = defaultStoryBackground
 		}
-		return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		msg := &waE2E.ExtendedTextMessage{
 			Text:           proto.String(text),
 			BackgroundArgb: proto.Uint32(backgroundARGB),
-		}}, nil
+		}
+		// Only set when a font was actually chosen. Sending the enum's zero
+		// value would say "SYSTEM" to every viewer, which is a choice nobody
+		// made and not the same as leaving the field out.
+		if f, ok := storyFontType(font); ok {
+			msg.Font = f.Enum()
+		}
+		return &waE2E.Message{ExtendedTextMessage: msg}, nil
 	}
 	// Photo and video statuses are the same message types as in a chat, with the
 	// caption as the words over them.

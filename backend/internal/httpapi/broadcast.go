@@ -15,6 +15,7 @@ import (
 	"github.com/salesan/omnichannel/backend/internal/models"
 	"github.com/salesan/omnichannel/backend/internal/realtime"
 	"github.com/salesan/omnichannel/backend/internal/repository"
+	"github.com/salesan/omnichannel/backend/internal/wa"
 )
 
 // Broadcast and WA Story over HTTP.
@@ -62,6 +63,11 @@ type campaignRequest struct {
 	// shows on the sender's own phone. Defaults to true: a broadcast the
 	// sender cannot find is the complaint this exists to answer.
 	SurfaceOnPhone *bool `json:"surface_on_phone"`
+	// StoryBackgroundARGB and StoryFont style a text Story. Both are carried
+	// inside the message WhatsApp delivers, so they are the sender's choice
+	// rather than a preview setting. Absent means WhatsApp's own default.
+	StoryBackgroundARGB *int64  `json:"story_background_argb"`
+	StoryFont           *string `json:"story_font"`
 	// Recurrence is daily, weekly or monthly. Empty means one run.
 	Recurrence      string  `json:"recurrence"`
 	RecurrenceUntil *string `json:"recurrence_until"`
@@ -255,6 +261,29 @@ func (s *Server) buildCampaign(
 		surface = *req.SurfaceOnPhone
 	}
 
+	// Refused here rather than truncated on the wire: a colour wider than the
+	// field would reach the viewer as a colour nobody picked, and a font this
+	// build cannot name would be sent as the enum's zero value, which means
+	// SYSTEM to every reader.
+	var storyBackground int64
+	if req.StoryBackgroundARGB != nil {
+		storyBackground = *req.StoryBackgroundARGB
+		if !wa.ValidStoryBackground(storyBackground) {
+			writeError(w, http.StatusBadRequest, "invalid_background",
+				"Warna latar story tidak dikenali.")
+			return builtCampaign{}, false
+		}
+	}
+	storyFont := ""
+	if req.StoryFont != nil {
+		storyFont = strings.ToLower(strings.TrimSpace(*req.StoryFont))
+		if !wa.ValidStoryFont(storyFont) {
+			writeError(w, http.StatusBadRequest, "invalid_font",
+				"Font story tidak dikenali.")
+			return builtCampaign{}, false
+		}
+	}
+
 	in := repository.SaveBroadcastInput{
 		CampaignType:          req.CampaignType,
 		Name:                  strings.TrimSpace(req.Name),
@@ -268,6 +297,8 @@ func (s *Server) buildCampaign(
 		DelayMaxSeconds:       req.DelayMaxSeconds,
 		AutoRetryOnDisconnect: autoRetry,
 		SurfaceOnPhone:        surface,
+		StoryBackgroundARGB:   storyBackground,
+		StoryFont:             storyFont,
 		Recurrence:            req.Recurrence,
 		TargetSource:          req.TargetSource,
 	}

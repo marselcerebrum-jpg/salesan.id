@@ -16,6 +16,12 @@ import {
 import { Notice, inputClass } from '@/components/campaign/shared';
 import { SenderStep } from '@/components/campaign/SenderStep';
 import { StoryPreview } from '@/components/campaign/StoryPreview';
+import {
+  STORY_COLOURS,
+  STORY_FONTS,
+  type StoryColourOption,
+  type StoryFontOption,
+} from '@/components/campaign/storyStyle';
 import { Button } from '@/components/ui/Button';
 import {
   ApiError,
@@ -67,6 +73,10 @@ export function StoryComposerPage({
   // one application per campaign, and it is the thing that decides which.
   const [applicationID, setApplicationID] = useState('');
   const [kind, setKind] = useState<StoryKind>('media');
+  // A text Story is words on a colour, and both are the sender's choice: they
+  // are carried inside the message, so every viewer sees them.
+  const [colour, setColour] = useState<StoryColourOption>(STORY_COLOURS[0]);
+  const [font, setFont] = useState<StoryFontOption>(STORY_FONTS[0]);
   const [mediaURL, setMediaURL] = useState('');
   const [caption, setCaption] = useState('');
   const [when, setWhen] = useState<When>('now');
@@ -156,6 +166,10 @@ export function StoryComposerPage({
       media_url: kind === 'media' ? mediaURL.trim() || null : null,
       media_storage_path: null,
       media_file_name: null,
+      // Only meaningful on a text Story. A photo carries its own picture, and
+      // sending a colour with it would store a choice that changes nothing.
+      story_background_argb: kind === 'text' ? colour.argb : null,
+      story_font: kind === 'text' ? font.id : null,
       delay_profile: defaultDelivery.profile,
       recurrence,
       recurrence_time: jakartaClock(anchor),
@@ -291,6 +305,65 @@ export function StoryComposerPage({
               />
             </Field>
 
+            {kind === 'text' ? (
+              <>
+                <Field label="Warna Latar" className="mt-4">
+                  <div className="flex flex-wrap gap-2">
+                    {STORY_COLOURS.map((c) => (
+                      <button
+                        key={c.argb}
+                        type="button"
+                        onClick={() => setColour(c)}
+                        aria-pressed={colour.argb === c.argb}
+                        aria-label={c.label}
+                        title={c.label}
+                        style={{ backgroundColor: c.hex }}
+                        className={clsx(
+                          'size-8 rounded-full transition-transform',
+                          colour.argb === c.argb
+                            ? 'ring-2 ring-brand-800 ring-offset-2 ring-offset-surface-raised'
+                            : 'hover:scale-110',
+                        )}
+                      />
+                    ))}
+                  </div>
+                </Field>
+
+                <Field label="Font" className="mt-4">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {STORY_FONTS.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setFont(f)}
+                        aria-pressed={font.id === f.id}
+                        style={{ fontFamily: f.css }}
+                        className={clsx(
+                          'h-10 rounded-control border text-sm transition-colors',
+                          font.id === f.id
+                            ? 'border-brand-800 bg-brand-800 text-white'
+                            : 'border-hairline bg-surface-sunken/50 text-ink-soft hover:bg-surface-sunken',
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  {/*
+                    Said plainly rather than left to be discovered: these are
+                    WhatsApp's typefaces, not ours to ship, so the preview
+                    reaches for the nearest thing this machine already has. The
+                    choice that travels is the right one; only the drawing here
+                    is approximate.
+                  */}
+                  <p className="mt-1.5 text-2xs text-ink-muted">
+                    Bentuk huruf di pratinjau hanya pendekatan. Yang dikirim ke
+                    WhatsApp adalah font aslinya.
+                  </p>
+                </Field>
+              </>
+            ) : null}
+
             <Field label="Waktu Mulai" className="mt-4">
               <div className="grid gap-2 sm:grid-cols-4">
                 {WHEN_OPTIONS.map((o) => (
@@ -389,6 +462,8 @@ export function StoryComposerPage({
               mediaKind={kind === 'media' ? 'image' : null}
               mediaURL={kind === 'media' ? mediaURL : ''}
               senderName={chosen[0]?.label ?? chosen[0]?.name ?? null}
+              background={kind === 'text' ? colour.hex : null}
+              fontCSS={kind === 'text' ? font.css : null}
               variables={[]}
               values={{}}
             />

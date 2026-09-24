@@ -1134,6 +1134,12 @@ export interface CampaignDraft {
   delay_max_seconds?: number | null;
   /** Keep a disconnected number's remaining share waiting for it to come back. */
   auto_retry_on_disconnect?: boolean;
+  /** A text Story's background, as the ARGB number WhatsApp itself carries.
+   *  Omit for WhatsApp's own colour. */
+  story_background_argb?: number | null;
+  /** A text Story's typeface, by the name the server translates. Omit for the
+   *  ordinary one. */
+  story_font?: string | null;
   /** 'daily' | 'weekly' | 'monthly'; omit for a single run. */
   recurrence?: Recurrence | '';
   recurrence_until?: string | null;
