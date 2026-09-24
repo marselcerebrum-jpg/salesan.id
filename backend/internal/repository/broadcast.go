@@ -152,7 +152,11 @@ func (r *Repo) SaveBroadcast(
 		        $25, $26, $27, $28, $29,
 		        -- Stored as a bare wall clock; the scheduler reads it in Jakarta.
 		        nullif($30, '')::time, $31, $32, $33, $34, $35,
-		        nullif($36, 0), nullif($37, ''))
+		        -- Cast before comparing. Without it Postgres reads the literal 0 as a
+		        -- four-byte integer and infers the same for the parameter, which
+		        -- refuses every colour whose alpha channel is set: those sit above
+		        -- two billion, which is most of them.
+		        nullif($36::bigint, 0), nullif($37, ''))
 		returning id`,
 		workspaceID, in.ApplicationID, primary, in.CampaignType, in.Name, in.Template,
 		status, in.ScheduledAt, len(in.Targets), createdBy, role, picUser,
