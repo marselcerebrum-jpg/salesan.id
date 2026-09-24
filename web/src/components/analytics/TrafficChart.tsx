@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { shiftDays } from '@/components/analytics/period';
-import { EmptyState, ErrorState, RowSkeleton } from '@/components/analytics/Primitives';
+import { EmptyState, ErrorState, InfoTip, RowSkeleton } from '@/components/analytics/Primitives';
 import { fetcher, trafficPath, type AnalyticsQuery, type TrafficPoint } from '@/lib/api';
 import { todayWIB } from '@/lib/useAnalyticsFilter';
 
@@ -168,19 +168,24 @@ export function TrafficChart({
     <section className="rounded-card border border-hairline bg-surface-raised px-4 py-4 shadow-e1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2
-            className="flex items-center gap-2 text-sm font-semibold text-ink"
-            title="Broadcast dan story tidak dihitung di sini: keduanya bukan percakapan."
-          >
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
             <Activity className="size-4 text-ink-muted" aria-hidden />
             Aktivitas Percakapan
+            <InfoTip
+              text={
+                (inHours
+                  ? 'Hanya pesan yang masuk dan keluar pada jam kerja.'
+                  : 'Jumlah pesan masuk dan keluar di semua aplikasi.') +
+                ' Broadcast dan story tidak dihitung di sini: keduanya bukan percakapan.'
+              }
+            />
           </h2>
-          <p className="mt-0.5 text-2xs text-ink-muted">
-            {inHours
-              ? 'Hanya pesan yang masuk dan keluar pada jam kerja.'
-              : 'Jumlah pesan masuk dan keluar di semua aplikasi.'}{' '}
-            <span className="text-ink-soft">{shownRange.note}.</span>
-          </p>
+          {/*
+            The window stays on the face of the card. It is not an explanation
+            but a statement of what is currently drawn, and a chart that hides
+            which stretch of time it covers is a chart that misleads.
+          */}
+          <p className="mt-0.5 text-2xs text-ink-soft">{shownRange.note}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

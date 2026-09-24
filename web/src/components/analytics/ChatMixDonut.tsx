@@ -2,7 +2,7 @@
 
 import { PieChart } from 'lucide-react';
 
-import { EmptyState } from '@/components/analytics/Primitives';
+import { EmptyState, InfoTip } from '@/components/analytics/Primitives';
 import type { PerformanceDay } from '@/lib/types';
 
 /**
@@ -33,15 +33,10 @@ export function ChatMixDonut({ summary }: { summary: PerformanceDay | undefined 
           <PieChart className="size-4" aria-hidden />
         </span>
         <div className="min-w-0">
-          <h2
-            className="truncate text-sm font-semibold text-ink"
-            title="Pribadi dihitung dari kontak unik yang menulis; grup dari grup yang aktif. Satu kontak atau satu grup dihitung sekali, berapa pun pesannya."
-          >
-            Distribusi Jenis Percakapan
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+            <span className="truncate">Distribusi Jenis Percakapan</span>
+            <InfoTip text="Perbandingan chat pribadi dan grup. Pribadi dihitung dari kontak unik yang menulis; grup dari grup yang aktif. Satu kontak atau satu grup dihitung sekali, berapa pun pesannya." />
           </h2>
-          <p className="text-2xs leading-snug text-ink-muted">
-            Perbandingan chat pribadi dan grup.
-          </p>
         </div>
       </div>
 

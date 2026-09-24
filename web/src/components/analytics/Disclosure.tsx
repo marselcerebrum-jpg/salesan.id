@@ -4,6 +4,8 @@ import clsx from 'clsx';
 import { ChevronDown, type LucideIcon } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
+import { ActionOverlay, InfoTip } from '@/components/analytics/Primitives';
+
 /**
  * A section of the Performa page that opens when it is asked for.
  *
@@ -19,6 +21,7 @@ import { useState, type ReactNode } from 'react';
 export function Disclosure({
   icon: Icon,
   title,
+  info,
   description,
   summary,
   actions,
@@ -27,6 +30,15 @@ export function Disclosure({
 }: {
   icon: LucideIcon;
   title: string;
+  /**
+   * What the section counts, shown behind the question mark next to the title.
+   *
+   * Prefer this to `description`. A sentence printed under every heading is
+   * read once and then becomes furniture the eye steps over on the way to the
+   * figures; the same sentence behind a mark is there when somebody actually
+   * wants it.
+   */
+  info?: string;
   description?: string;
   /** A count or a range, shown on the closed row so it need not be opened. */
   summary?: ReactNode;
@@ -39,12 +51,18 @@ export function Disclosure({
 
   return (
     <section className="rounded-card border border-hairline bg-surface-raised shadow-e1">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 rounded-card px-5 py-3.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-      >
+      {/*
+        The row opens the section from underneath rather than wrapping it.
+        A button around content that contains another button is invalid HTML,
+        and the question mark is a button; see ActionOverlay for the whole
+        reasoning. `relative` and the hover styling live here because the
+        pointer is over this container, not over the overlay.
+      */}
+      <div className="relative flex items-center gap-3 rounded-card px-5 py-3.5 transition-colors hover:bg-surface-sunken/40">
+        <ActionOverlay
+          label={open ? `Tutup ${title}` : `Buka ${title}`}
+          onClick={() => setOpen((v) => !v)}
+        />
         {/* Chevron on the left, where a disclosure belongs: it marks the row as
             something that opens before the eye reaches the content. */}
         <ChevronDown
@@ -57,7 +75,10 @@ export function Disclosure({
           <Icon className="size-[18px]" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-base font-semibold text-ink">{title}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-base font-semibold text-ink">{title}</span>
+            {info ? <InfoTip text={info} /> : null}
+          </span>
           {description ? (
             <span className="block text-xs text-ink-muted">{description}</span>
           ) : null}
@@ -65,7 +86,7 @@ export function Disclosure({
         {summary ? (
           <span className="nums shrink-0 text-xs text-ink-muted">{summary}</span>
         ) : null}
-      </button>
+      </div>
 
       {open ? (
         <div className="border-t border-hairline px-5 py-4">

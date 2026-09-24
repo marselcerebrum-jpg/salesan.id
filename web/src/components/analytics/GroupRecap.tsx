@@ -16,7 +16,7 @@ import Link from 'next/link';
 
 import { DAILY_GROUPS, type DailyColumn } from '@/components/analytics/dailyColumns';
 import type { DrilldownKind } from '@/components/analytics/DrilldownPanel';
-import { RowSkeleton } from '@/components/analytics/Primitives';
+import { InfoTip, RowSkeleton } from '@/components/analytics/Primitives';
 import type { LabelUsage, PerformanceDay } from '@/lib/types';
 
 /**
@@ -267,6 +267,8 @@ export function GroupRecap({
                 <h3 className="flex-1 truncate text-sm font-semibold text-ink">{group.label}</h3>
               )}
 
+              {card.note ? <InfoTip text={card.note} /> : null}
+
               {drill ? (
                 <button
                   type="button"
@@ -362,11 +364,6 @@ export function GroupRecap({
               </div>
             )}
 
-            {card.note ? (
-              <p className="border-t border-hairline px-4 py-2 text-2xs leading-relaxed text-ink-muted">
-                {card.note}
-              </p>
-            ) : null}
           </section>
         );
       })}

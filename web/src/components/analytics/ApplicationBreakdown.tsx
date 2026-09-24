@@ -222,10 +222,12 @@ export function ApplicationBreakdown({
       defaultOpen={defaultOpen}
       icon={LayoutGrid}
       title={personal ? 'Pekerjaan Per Aplikasi' : 'Rincian Per Aplikasi'}
-      description={
-        personal
-          ? 'Apa saja yang dikerjakan akun ini di tiap aplikasi. Tekan satu baris untuk memfilter seluruh halaman ke aplikasi itu.'
-          : 'Periode yang sama, dipecah per aplikasi. Tekan satu baris untuk memfilter seluruh halaman ke aplikasi itu.'
+      info={
+        (personal
+          ? 'Apa saja yang dikerjakan akun ini di tiap aplikasi.'
+          : 'Periode yang sama, dipecah per aplikasi.') +
+        ' Tekan satu baris untuk memfilter seluruh halaman ke aplikasi itu. ' +
+        caveat
       }
       summary={
         personal && !showIdle

@@ -22,7 +22,7 @@ import { GroupRecap } from '@/components/analytics/GroupRecap';
 import { PeriodMenu } from '@/components/analytics/PeriodMenu';
 import { TeamRank } from '@/components/analytics/TeamRank';
 import { TrafficChart } from '@/components/analytics/TrafficChart';
-import { ErrorState, PageShell } from '@/components/analytics/Primitives';
+import { ErrorState, InfoTip, PageShell } from '@/components/analytics/Primitives';
 import {
   analyticsFiltersPathFor,
   analyticsPath,
@@ -144,14 +144,24 @@ function Dashboard() {
     <PageShell>
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink">Dashboard</h1>
-          <p className="mt-1 text-sm text-ink-muted">
-            {role === 'freelance'
-              ? 'Pantau pekerjaan Anda sendiri di seluruh aplikasi yang Anda pegang.'
-              : role === 'pic'
-                ? 'Pantau aktivitas WhatsApp di aplikasi yang Anda pegang, termasuk pekerjaan Freelance di bawah Anda.'
-                : 'Pantau aktivitas WhatsApp dari seluruh aplikasi secara real-time.'}
-          </p>
+          {/*
+            The heading carries its own explanation behind a mark rather than a
+            sentence beneath it. What the sentence says depends on the reader's
+            role, so it is worth keeping; what it is not worth is a line of
+            prose above every figure on the page, every time the page is opened.
+          */}
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-[-0.02em] text-ink">
+            Dashboard
+            <InfoTip
+              text={
+                role === 'freelance'
+                  ? 'Pantau pekerjaan Anda sendiri di seluruh aplikasi yang Anda pegang.'
+                  : role === 'pic'
+                    ? 'Pantau aktivitas WhatsApp di aplikasi yang Anda pegang, termasuk pekerjaan Freelance di bawah Anda.'
+                    : 'Pantau aktivitas WhatsApp dari seluruh aplikasi secara real-time.'
+              }
+            />
+          </h1>
         </div>
 
         <div className="flex flex-wrap items-start gap-4">
