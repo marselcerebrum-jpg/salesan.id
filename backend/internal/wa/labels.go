@@ -470,6 +470,17 @@ const appStateRetryCooldown = 20 * time.Second
 // that nobody spends an afternoon unable to label a chat.
 const appStateForceAfter = 3
 
+// appStateForceBackoff is the least time between two forced re-reads of one
+// collection.
+//
+// A forced re-read costs the phone a full plaintext dump and only repairs
+// anything if the phone answers. When it does not answer, the collection stays
+// wedged and the failures resume, so without a floor the repair becomes a loop
+// that asks a silent phone over and over. Fifteen minutes is long enough that a
+// phone which is merely busy gets its turn, and short enough that one which
+// comes back is repaired within the hour.
+const appStateForceBackoff = 15 * time.Minute
+
 // handleAppStateSyncError reacts to a live app-state notification that failed
 // to decode.
 //
@@ -495,7 +506,7 @@ func (s *Session) handleAppStateSyncError(evt *events.AppStateSyncError) {
 	// write them to it. Counting the failures is what turns that endless loop
 	// into a repair.
 	failures := s.countAppStateFailure(evt.Name)
-	force := failures >= appStateForceAfter
+	force := failures >= appStateForceAfter && s.mayForceAppState(evt.Name)
 	if force {
 		s.log.Warn("collection has failed repeatedly; clearing stored state and re-reading it whole",
 			"patch", evt.Name, "failures", failures)
@@ -536,6 +547,29 @@ func (s *Session) resetAppStateFailures(name appstate.WAPatchName) {
 			n.Store(0)
 		}
 	}
+	s.appStateForcedAt.Delete(string(name))
+}
+
+// mayForceAppState reports whether enough time has passed to clear and re-read
+// this collection again, and records the attempt when it says yes.
+//
+// The answer is no far more often than the failure count alone would suggest,
+// and deliberately so: a phone that ignored the last request will ignore the
+// next one, and asking anyway costs it a full dump each time while leaving the
+// collection exactly as wedged. The account keeps reporting its labels as out
+// of sync, which is the truth, until either the phone answers or someone
+// presses Sinkron.
+func (s *Session) mayForceAppState(name appstate.WAPatchName) bool {
+	key := string(name)
+	if last, ok := s.appStateForcedAt.Load(key); ok {
+		if at, _ := last.(time.Time); time.Since(at) < appStateForceBackoff {
+			s.log.Debug("already cleared this collection recently; leaving it to the phone",
+				"patch", name, "since", time.Since(at).Round(time.Second))
+			return false
+		}
+	}
+	s.appStateForcedAt.Store(key, time.Now())
+	return true
 }
 
 // --- reconciliation ----------------------------------------------------------

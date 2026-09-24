@@ -78,6 +78,15 @@ type Session struct {
 	// failing once is a hiccup, failing repeatedly is a wedge.
 	appStateFailures sync.Map // map[string]*atomic.Int32
 
+	// appStateForcedAt is when this collection was last cleared and re-read
+	// from scratch, keyed by patch name.
+	//
+	// Clearing only helps if the phone answers with the snapshot. A phone that
+	// never answers leaves the collection exactly as wedged as before, and
+	// without this the next three failures would clear it again, and again.
+	// One account did that eighteen times in ten minutes.
+	appStateForcedAt sync.Map // map[string]time.Time
+
 	// recoveryGates holds an open channel per collection currently being
 	// recovered. Writes to a collection whose local version was cleared are
 	// rejected by the server with `409 conflict`, so writers wait on the gate
