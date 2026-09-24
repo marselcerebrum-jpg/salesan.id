@@ -251,6 +251,60 @@ type LabelPush struct {
 
 func offline(reason string) *LabelPush { return &LabelPush{Reason: reason} }
 
+// wedgedCollection reports whether a write failed because the collection's
+// stored state no longer matches WhatsApp's, rather than for any of the
+// ordinary reasons a write can fail.
+//
+// WhatsApp answers such a write with `409 conflict` and, in the same breath,
+// fails to apply the patches it sends back. Both halves appear in one error
+// string, which is the only place the two are reported together, so this reads
+// them from the text. Matching on the code alone would catch conflicts that a
+// retry genuinely fixes, and repairing the whole collection for one of those
+// would cost the phone a full dump it did not need.
+func wedgedCollection(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, `code="409"`) && strings.Contains(text, "LTHash")
+}
+
+// repairAndRetryLabelWrite clears the collection, waits for WhatsApp to send it
+// back, and runs the write once more.
+//
+// An operator tagging a chat is the same signal as pressing Sinkron: somebody
+// is at the screen and the phone is presumed reachable. So this forces the
+// repair immediately rather than waiting out the backoff that protects a phone
+// nobody is watching.
+//
+// The retry is deliberately single. If the collection is still not writable
+// after a fresh copy has landed, trying again in the same request only makes
+// the operator wait longer for the same answer.
+func (s *Session) repairAndRetryLabelWrite(
+	ctx context.Context,
+	send func() error,
+) error {
+	s.log.Warn("label write refused because the collection is out of step; repairing it now")
+
+	if _, err := s.requestAppStateRecovery(ctx, appstate.WAPatchRegular, true); err != nil {
+		return fmt.Errorf("meminta WhatsApp mengirim ulang label: %w", err)
+	}
+	if err := s.waitAppStateWritable(ctx, appstate.WAPatchRegular, labelWriteWait); err != nil {
+		return err
+	}
+	return send()
+}
+
+// labelWedgedMessage is what the operator is told when even the repair did not
+// make the collection writable.
+//
+// Deliberately not the library's own words. "server returned error updating app
+// state (regular): <error code=409 ...> mismatching LTHash" tells somebody
+// tagging a chat nothing they can act on, and the one thing they can act on —
+// open WhatsApp on that phone — is not in it anywhere.
+const labelWedgedMessage = "Daftar label di HP nomor ini sedang tidak sinkron, jadi WhatsApp menolak perubahannya. " +
+	"Buka WhatsApp di HP tersebut dan biarkan terhubung sebentar, lalu tekan Sinkron pada nomor ini dan coba lagi."
+
 // labelWriteWait bounds how long a write waits for a collection being
 // recovered. Recovery normally completes in two to three seconds; beyond this
 // the operator is better served by a clear failure than a hanging request.
@@ -326,10 +380,24 @@ func (m *Manager) PushLabelDefinition(
 		waID = allocated
 	}
 
-	if err := s.client.SendAppState(ctx,
-		appstate.BuildLabelEdit(waID, name, colorIndex, deleted)); err != nil {
-		s.log.Warn("push label definition", "label", name, "err", err)
-		return offline("WhatsApp menolak perubahan: " + err.Error()), nil
+	send := func() error {
+		return s.client.SendAppState(ctx, appstate.BuildLabelEdit(waID, name, colorIndex, deleted))
+	}
+	if err := send(); err != nil {
+		// Creating a label is the first write most operators make, so it is
+		// also where a collection that fell out of step is first noticed. Same
+		// treatment as tagging a chat: repair it and write once more.
+		if wedgedCollection(err) {
+			if err = s.repairAndRetryLabelWrite(ctx, send); err != nil {
+				s.log.Warn("push label definition still refused after repair",
+					"label", name, "err", err)
+				return offline(labelWedgedMessage), nil
+			}
+			s.log.Info("label definition pushed after repairing the collection", "label", name)
+		} else {
+			s.log.Warn("push label definition", "label", name, "err", err)
+			return offline("WhatsApp menolak perubahan: " + err.Error()), nil
+		}
 	}
 
 	if !deleted {
@@ -414,12 +482,30 @@ func (m *Manager) PushChatLabel(
 	// nothing, and no error is raised anywhere. One extra mutation removes the
 	// guess. The unused key is an orphan entry in app state and nothing more.
 	for _, jid := range s.labelChatAddresses(ctx, chatJID) {
-		if err := s.client.SendAppState(ctx, appstate.BuildLabelChat(jid, waID, labeled)); err != nil {
+		send := func() error {
+			return s.client.SendAppState(ctx, appstate.BuildLabelChat(jid, waID, labeled))
+		}
+
+		err := send()
+		if wedgedCollection(err) {
+			// The collection is out of step rather than the write being wrong.
+			// Repair it and try the same write once more, so the operator's
+			// action lands instead of being handed back to them.
+			err = s.repairAndRetryLabelWrite(ctx, send)
+			if wedgedCollection(err) || err != nil {
+				s.log.Warn("push chat label still refused after repair",
+					"wa_label_id", waID, "chat", jid.String(), "err", err)
+				return offline(labelWedgedMessage), nil
+			}
+			s.log.Info("chat label pushed after repairing the collection",
+				"wa_label_id", waID, "chat", jid.String())
+		} else if err != nil {
 			s.log.Warn("push chat label", "wa_label_id", waID, "chat", jid.String(), "err", err)
 			return offline("WhatsApp menolak perubahan: " + err.Error()), nil
+		} else {
+			s.log.Info("chat label pushed to phone",
+				"wa_label_id", waID, "chat", jid.String(), "labeled", labeled)
 		}
-		s.log.Info("chat label pushed to phone",
-			"wa_label_id", waID, "chat", jid.String(), "labeled", labeled)
 	}
 	return &LabelPush{PushedToPhone: true}, nil
 }

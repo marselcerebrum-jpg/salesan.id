@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -71,5 +72,34 @@ func TestForcedReReadIsRateLimited(t *testing.T) {
 	s.resetAppStateFailures(appstate.WAPatchRegular)
 	if !s.mayForceAppState(appstate.WAPatchRegular) {
 		t.Error("after a success the collection may be forced again")
+	}
+}
+
+// The write path has to tell two failures apart. A collection whose stored
+// state no longer matches WhatsApp's is repaired and the write retried; an
+// ordinary refusal is reported as it came, because repairing the whole
+// collection for one of those costs the phone a full dump it did not need.
+//
+// WhatsApp reports the first as a 409 together with a failure to apply the
+// patches it sent back, and both halves arrive in one error string. That is
+// the only place the two are stated together, which is why this reads the text.
+func TestOnlyAWedgedCollectionTriggersARepair(t *testing.T) {
+	wedged := errors.New(`server returned error updating app state (regular): ` +
+		`<error code="409" text="conflict"/> (also, applying patches in the response failed: ` +
+		`failed to decode app state regular patches: failed to verify patch v1103: mismatching LTHash)`)
+	if !wedgedCollection(wedged) {
+		t.Error("the error the operator actually sees must be recognised as a wedge")
+	}
+
+	for name, err := range map[string]error{
+		"nothing at all":                 nil,
+		"a plain conflict a retry fixes": errors.New(`server returned error: <error code="409" text="conflict"/>`),
+		"a hash failure while reading":   errors.New("failed to verify patch v1103: mismatching LTHash"),
+		"being offline":                  errors.New("websocket disconnected"),
+		"a refusal":                      errors.New(`<error code="403" text="forbidden"/>`),
+	} {
+		if wedgedCollection(err) {
+			t.Errorf("%s must not trigger a repair of the whole collection", name)
+		}
 	}
 }
