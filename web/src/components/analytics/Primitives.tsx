@@ -2,7 +2,8 @@
 
 import clsx from 'clsx';
 import { AlertTriangle, HelpCircle, Inbox, RotateCcw } from 'lucide-react';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * Shared pieces for the Dashboard and Performa pages.
@@ -89,9 +90,97 @@ export function MetricSection({
  * This is where the definitions live. A dashboard carrying its own
  * documentation has to be read before it can be scanned, which defeats it.
  */
+const TIP_WIDTH = 230;
+/** Space between the icon and the bubble. */
+const TIP_GAP = 8;
+/** How close the bubble may come to the edge of the window. */
+const TIP_EDGE = 8;
+
+/**
+ * Where the bubble sits, in window coordinates.
+ *
+ * Measured rather than declared, because the bubble is drawn outside the
+ * element that owns it and therefore cannot inherit its position.
+ */
+interface TipPlacement {
+  top: number;
+  left: number;
+  /** True when there was not enough room above and it opens downwards. */
+  below: boolean;
+}
+
 export function InfoTip({ text }: { text: string }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const [place, setPlace] = useState<TipPlacement | null>(null);
+
+  /*
+   * The bubble is drawn at the end of <body>, not next to its icon.
+   *
+   * Positioned absolutely inside the table, it was cut off by the first
+   * ancestor that scrolls. The daily breakdown table is `max-h-[70vh]
+   * overflow-auto`, and its help icons sit in the header at the very top, so a
+   * bubble opening upwards was sliced across the middle of a sentence: the
+   * reader saw "web maupun HP. Broadcast tidak termasuk." floating above the
+   * card with the beginning of the sentence nowhere on screen.
+   *
+   * No ancestor can clip what is not inside it. The cost is that the position
+   * has to be measured and then kept, which is what the listeners below do.
+   */
+  useEffect(() => {
+    if (!open) {
+      setPlace(null);
+      return;
+    }
+    const measure = () => {
+      const a = anchor.current?.getBoundingClientRect();
+      if (!a) return;
+      // Above by default, because a figure is usually read downwards and a
+      // bubble below it would cover the next row. Flipped when the icon is too
+      // near the top of the window for the bubble to fit.
+      const below = a.top < 140;
+      setPlace({
+        top: below ? a.bottom + TIP_GAP : a.top - TIP_GAP,
+        left: Math.min(
+          Math.max(a.left + a.width / 2 - TIP_WIDTH / 2, TIP_EDGE),
+          window.innerWidth - TIP_WIDTH - TIP_EDGE,
+        ),
+        below,
+      });
+    };
+    measure();
+    // `true` catches scrolling inside the table as well as the page itself.
+    window.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('scroll', measure, true);
+      window.removeEventListener('resize', measure);
+    };
+  }, [open]);
+
+  const bubble =
+    open && place && typeof document !== 'undefined'
+      ? createPortal(
+          <span
+            id={id}
+            role="tooltip"
+            style={{
+              top: place.top,
+              left: place.left,
+              width: TIP_WIDTH,
+              transform: place.below ? undefined : 'translateY(-100%)',
+            }}
+            // Ignores the mouse: the bubble sits under the pointer on its way
+            // out of the icon, and a bubble that swallowed that movement would
+            // flicker as the icon lost and regained the hover.
+            className="pointer-events-none fixed z-50 rounded-lg border border-hairline bg-surface-raised px-2.5 py-2 text-xs leading-snug font-normal text-ink-soft shadow-e3"
+          >
+            {text}
+          </span>,
+          document.body,
+        )
+      : null;
 
   return (
     // `z-10` and `pointer-events-auto` are what let this survive inside a row
@@ -99,6 +188,7 @@ export function InfoTip({ text }: { text: string }) {
     // from underneath and needs this control to stay on top of it.
     <span className="pointer-events-auto relative z-10 inline-flex">
       <button
+        ref={anchor}
         type="button"
         aria-label="Penjelasan"
         aria-describedby={open ? id : undefined}
@@ -114,15 +204,7 @@ export function InfoTip({ text }: { text: string }) {
       >
         <HelpCircle className="size-3.5" />
       </button>
-      {open ? (
-        <span
-          id={id}
-          role="tooltip"
-          className="absolute bottom-full left-1/2 z-30 mb-1.5 w-[230px] -translate-x-1/2 rounded-lg border border-hairline bg-surface-raised px-2.5 py-2 text-xs leading-snug font-normal text-ink-soft shadow-e3"
-        >
-          {text}
-        </span>
-      ) : null}
+      {bubble}
     </span>
   );
 }
