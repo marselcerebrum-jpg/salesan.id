@@ -67,6 +67,17 @@ type Session struct {
 	// whatsmeow's event goroutine both touch it.
 	labelRecoverySince atomic.Int64
 
+	// appStateFailures counts how many times a collection has failed to decode
+	// since it last decoded successfully, keyed by patch name.
+	//
+	// A polite recovery leaves the stored state in place and asks the phone to
+	// resend. That repairs a collection that merely fell behind. It cannot
+	// repair one whose stored hash no longer matches the server's, because the
+	// resent patches are verified against the same broken base and fail at the
+	// same version every time. This counter is what tells the two apart:
+	// failing once is a hiccup, failing repeatedly is a wedge.
+	appStateFailures sync.Map // map[string]*atomic.Int32
+
 	// recoveryGates holds an open channel per collection currently being
 	// recovered. Writes to a collection whose local version was cleared are
 	// rejected by the server with `409 conflict`, so writers wait on the gate

@@ -121,8 +121,10 @@ func (s *Session) handleAppStateSyncComplete(evt *events.AppStateSyncComplete) {
 		"result":     SyncResult{Labels: labels},
 	})
 
-	// The collection is writable again now that its version is restored.
+	// The collection is writable again now that its version is restored, and
+	// the run of failures that led here is over.
 	s.markRecovered(evt.Name)
+	s.resetAppStateFailures(evt.Name)
 
 	// `regular` is the collection labels live in; once it lands the two sides
 	// agree, so flip the badge and push the finished set.

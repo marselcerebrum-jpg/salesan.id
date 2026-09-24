@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -457,6 +458,18 @@ func (s *Session) labelChatAddresses(ctx context.Context, chat types.JID) []type
 // full plaintext dump of the collection.
 const appStateRetryCooldown = 20 * time.Second
 
+// appStateForceAfter is how many consecutive decode failures on one collection
+// are treated as wedged rather than unlucky.
+//
+// Below this the repair stays polite, because clearing the stored version
+// blocks label writes until the snapshot lands and a collection that merely
+// fell behind does not need that. At this point politeness has stopped being a
+// kindness: HP UTAMA on JADISEKDIN failed on the same patch thirty-three times
+// in two hours, and every label written from salesan was refused by WhatsApp
+// with `409 conflict` throughout. Three is enough to be sure and short enough
+// that nobody spends an afternoon unable to label a chat.
+const appStateForceAfter = 3
+
 // handleAppStateSyncError reacts to a live app-state notification that failed
 // to decode.
 //
@@ -473,9 +486,22 @@ func (s *Session) handleAppStateSyncError(evt *events.AppStateSyncError) {
 	_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSyncing, "")
 	s.broadcastSyncState(ctx, LabelSyncSyncing, "")
 
-	// Automatic repair: declines if usable state already exists, so a failed
-	// notification never costs the account its ability to write labels.
-	sent, err := s.requestAppStateRecovery(ctx, evt.Name, false)
+	// Polite first, forceful once politeness has demonstrably failed.
+	//
+	// A recovery that keeps the stored version asks the phone to resend, and
+	// the resent patches are then verified against the version we already
+	// hold. When that version is the problem, every resend fails at the same
+	// place, and the account is left unable to read labels from the phone or
+	// write them to it. Counting the failures is what turns that endless loop
+	// into a repair.
+	failures := s.countAppStateFailure(evt.Name)
+	force := failures >= appStateForceAfter
+	if force {
+		s.log.Warn("collection has failed repeatedly; clearing stored state and re-reading it whole",
+			"patch", evt.Name, "failures", failures)
+	}
+
+	sent, err := s.requestAppStateRecovery(ctx, evt.Name, force)
 	if err != nil {
 		s.log.Warn("automatic app state recovery failed", "patch", evt.Name, "err", err)
 		_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncFailed, err.Error())
@@ -483,7 +509,32 @@ func (s *Session) handleAppStateSyncError(evt *events.AppStateSyncError) {
 		return
 	}
 	if sent {
-		s.log.Info("automatic app state recovery requested", "patch", evt.Name)
+		s.log.Info("automatic app state recovery requested", "patch", evt.Name, "forced", force)
+		if force {
+			// Cleared, so the next failure starts a fresh count rather than
+			// forcing again on the very next notification.
+			s.resetAppStateFailures(evt.Name)
+		}
+	}
+}
+
+// countAppStateFailure records one decode failure and returns the run length.
+func (s *Session) countAppStateFailure(name appstate.WAPatchName) int {
+	v, _ := s.appStateFailures.LoadOrStore(string(name), new(atomic.Int32))
+	n, ok := v.(*atomic.Int32)
+	if !ok {
+		return 1
+	}
+	return int(n.Add(1))
+}
+
+// resetAppStateFailures forgets the run, which a collection that decoded
+// successfully has earned.
+func (s *Session) resetAppStateFailures(name appstate.WAPatchName) {
+	if v, ok := s.appStateFailures.Load(string(name)); ok {
+		if n, ok := v.(*atomic.Int32); ok {
+			n.Store(0)
+		}
 	}
 }
 
