@@ -691,14 +691,34 @@ func (r *Repo) attachQuotes(ctx context.Context, page []models.Message) error {
 		return nil
 	}
 
+	// Found by WhatsApp's own message id, across every number in this
+	// workspace, rather than only under the number being read.
+	//
+	// One group is followed by several of our numbers and its messages are
+	// stored once per number. A reply read through number A whose quoted
+	// message happens to be stored under number B was declared missing, and the
+	// bubble above it read as an unsupported message. Counted on production
+	// data: 916 quotes failed to resolve in seven days, 144 of which were in
+	// the database the whole time under another number.
+	//
+	// `distinct on` keeps the reader's own copy when there is one, so a quote
+	// that can be opened still points at the row in the thread they are looking
+	// at. The workspace join is the boundary: a message id is unique to
+	// WhatsApp, but nothing outside this workspace may be reached through it.
 	rows, err := r.pool.Query(ctx, `
-		select m.wa_message_id, m.id, m.sender_name, m.from_me, m.type::text,
+		select distinct on (m.wa_message_id)
+		       m.wa_message_id, m.id, m.account_id, m.sender_name, m.from_me, m.type::text,
 		       coalesce(nullif(m.body,''), nullif(m.caption,''), ''),
 		       m.revoked_at,
 		       (select a.thumbnail_b64 from public.message_attachments a
 		         where a.message_id = m.id order by a.idx limit 1)
 		  from public.messages m
-		 where m.account_id = $1 and m.wa_message_id = any($2)`, accountID, waIDs)
+		  join public.whatsapp_accounts acc on acc.id = m.account_id
+		 where m.wa_message_id = any($2)
+		   and acc.workspace_id = (
+		     select workspace_id from public.whatsapp_accounts where id = $1)
+		 order by m.wa_message_id, (m.account_id = $1) desc, m.timestamp`,
+		accountID, waIDs)
 	if err != nil {
 		return err
 	}
@@ -707,9 +727,9 @@ func (r *Repo) attachQuotes(ctx context.Context, page []models.Message) error {
 	found := map[string]models.QuotedMessage{}
 	for rows.Next() {
 		var q models.QuotedMessage
-		var id uuid.UUID
+		var id, owner uuid.UUID
 		var revokedAt *time.Time
-		if err := rows.Scan(&q.WAMessageID, &id, &q.SenderName, &q.FromMe, &q.Type,
+		if err := rows.Scan(&q.WAMessageID, &id, &owner, &q.SenderName, &q.FromMe, &q.Type,
 			&q.Text, &revokedAt, &q.Thumbnail); err != nil {
 			return err
 		}
@@ -717,7 +737,13 @@ func (r *Repo) attachQuotes(ctx context.Context, page []models.Message) error {
 			q.Text = "Pesan ini dihapus"
 			q.Thumbnail = nil
 		}
-		q.ID = &id
+		// The id is an offer to jump to the original, so it is only given when
+		// the original is in this number's own thread. Borrowing another
+		// number's copy would send the reader to a conversation they were not
+		// reading, which is worse than not offering the jump at all.
+		if owner == accountID {
+			q.ID = &id
+		}
 		found[q.WAMessageID] = q
 	}
 	if err := rows.Err(); err != nil {
