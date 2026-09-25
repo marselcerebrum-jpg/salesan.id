@@ -530,7 +530,10 @@ func (m *Manager) RevokeStory(ctx context.Context, accountID uuid.UUID, waMessag
 	if err != nil {
 		return err
 	}
-	m.removeStoredObjects(ctx, keys)
+	// The attachment rows went with the revoke, so anything still pointing at
+	// these files is another message — the same Story published from a second
+	// number, for instance — and that message keeps them.
+	m.releaseAndRemove(ctx, keys, nil)
 	if updated != nil {
 		m.broadcastMessageStatus(s.WorkspaceID, accountID, updated.ConversationID, updated)
 	}

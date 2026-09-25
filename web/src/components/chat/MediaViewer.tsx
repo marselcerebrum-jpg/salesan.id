@@ -18,7 +18,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 
 import { getAttachmentUrl } from '@/lib/api';
 import { cacheLink, formatBytes } from '@/lib/media';
-import { useAttachmentUrl } from '@/lib/useAttachmentUrl';
+import { attachmentFailureText, useAttachmentUrl } from '@/lib/useAttachmentUrl';
 import type { Attachment } from '@/lib/types';
 
 export type ViewerAction = 'reply' | 'forward';
@@ -75,7 +75,8 @@ export function MediaViewer({
 
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const { url, loading, error, gone, expired, reload } = useAttachmentUrl(attachment, open);
+  const { url, loading, error, gone, expired, reload, reportUnreadable } =
+    useAttachmentUrl(attachment, open);
 
   // Each new item starts from a clean view rather than inheriting the last
   // one's zoom and rotation.
@@ -311,15 +312,12 @@ export function MediaViewer({
         ) : error ? (
           <div className="text-center text-white/75">
             <p className="text-sm">
-              {expired
-                ? 'Berkas sudah expired, silakan cek di HP.'
-                : gone
-                  ? 'Berkas ini sudah tidak tersedia di server WhatsApp.'
-                  : error}
+              {attachmentFailureText(attachment?.kind ?? 'image', gone, expired, error)}
             </p>
-            {expired ? (
+            {gone || expired ? (
               <p className="mt-1 text-xs text-white/55">
-                Disimpan di sini selama 7 hari. Pesannya tetap ada di WhatsApp pada HP Anda.
+                Berkas hanya disimpan sementara di server. Pesannya tetap ada di WhatsApp pada HP
+                Anda.
               </p>
             ) : null}
             {!gone ? (
@@ -341,6 +339,9 @@ export function MediaViewer({
             src={url}
             alt={attachment.file_name ?? 'Gambar'}
             draggable={false}
+            // Same reason as the bubble: only the browser finds out that the
+            // object behind a perfectly valid signed URL is not there.
+            onError={reportUnreadable}
             onLoad={(event) =>
               setNatural({
                 w: event.currentTarget.naturalWidth,

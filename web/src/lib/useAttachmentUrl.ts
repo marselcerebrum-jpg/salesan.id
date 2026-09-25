@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError, getAttachmentUrl } from '@/lib/api';
 import { cacheLink, cachedLink, forgetLink } from '@/lib/media';
-import type { Attachment } from '@/lib/types';
+import type { Attachment, AttachmentKind } from '@/lib/types';
 
 export interface AttachmentUrlState {
   url: string | null;
@@ -24,6 +24,20 @@ export interface AttachmentUrlState {
    */
   expired: boolean;
   reload: () => void;
+  /**
+   * Called by the element when the URL itself would not load.
+   *
+   * A signed URL is minted from the row, and the row can be wrong: it says the
+   * file is stored while the object is no longer in the bucket. The server
+   * cannot tell — it would have to ask the bucket on every single preview — so
+   * the element that actually tried is the one that knows.
+   *
+   * The first failure is treated as a stale link and answered with a fresh one,
+   * because a signed URL does expire and a network can blink. A second failure
+   * on a brand new URL is the file being absent, and that is reported as such
+   * rather than as one more thing to retry forever.
+   */
+  reportUnreadable: () => void;
 }
 
 /**
@@ -55,6 +69,8 @@ export function useAttachmentUrl(
   const [gone, setGone] = useState(false);
   const [expired, setExpired] = useState(false);
   const [nonce, setNonce] = useState(0);
+  // Whether a fresh URL has already been tried for this attachment.
+  const retriedBrokenLink = useRef(false);
 
   // Guards against a response for a previous attachment landing after the
   // component has moved on to another one.
@@ -108,6 +124,7 @@ export function useAttachmentUrl(
     setError(null);
     setGone(false);
     setExpired(false);
+    retriedBrokenLink.current = false;
   }, [id, status]);
 
   const reload = useCallback(() => {
@@ -116,19 +133,67 @@ export function useAttachmentUrl(
     setNonce((n) => n + 1);
   }, [id]);
 
-  return { url, loading, error, gone, expired, reload };
+  const reportUnreadable = useCallback(() => {
+    if (!id) return;
+    forgetLink(id);
+    if (!retriedBrokenLink.current) {
+      retriedBrokenLink.current = true;
+      setUrl(null);
+      setNonce((n) => n + 1);
+      return;
+    }
+    // Our copy is not there. Not "unavailable" in WhatsApp's sense, and not
+    // something a retry reaches, so it is reported the same way an expired file
+    // is: the message still exists, and the file is still on the phone.
+    setUrl(null);
+    setGone(true);
+    setError('Berkas tidak ada di server');
+  }, [id]);
+
+  return { url, loading, error, gone, expired, reload, reportUnreadable };
+}
+
+/**
+ * How a file that is no longer on our side is described.
+ *
+ * Said per kind, because "Berkas" is what a developer calls it and nobody else
+ * does, and said the same way whether our copy expired or was never there: to
+ * the reader those are one situation, and the useful half of the sentence is
+ * where the file still is. The message itself has not gone anywhere — only our
+ * copy of the file — and it is still in the chat on the phone.
+ */
+const UNREADABLE_TEXT: Record<AttachmentKind, string> = {
+  image: 'Gambar tidak dapat ditampilkan, silakan cek di HP',
+  sticker: 'Stiker tidak dapat ditampilkan, silakan cek di HP',
+  video: 'Video tidak dapat ditampilkan, silakan cek di HP',
+  audio: 'Audio tidak dapat diputar, silakan cek di HP',
+  document: 'Dokumen tidak dapat dibuka, silakan cek di HP',
+};
+
+export function attachmentUnreadableText(kind: AttachmentKind): string {
+  return UNREADABLE_TEXT[kind] ?? 'Berkas tidak dapat dibuka, silakan cek di HP';
 }
 
 /**
  * What to put on a bubble whose file could not be produced.
  *
- * One place, so the four media types cannot word the same situation three
+ * One place, so the media types cannot word the same situation several
  * different ways.
+ *
+ * `detail` is the server's own explanation, and it is preferred over anything
+ * written here for the cases that are not final. "Nomor WhatsApp ini sedang
+ * tidak terhubung" tells somebody what to do; the "Gagal memuat" that used to
+ * replace it told them nothing, and the retry underneath it could not work
+ * until the number came back.
  */
-export function attachmentFailureText(gone: boolean, expired: boolean): string {
-  if (expired) return 'Berkas sudah expired, silakan cek di HP';
-  if (gone) return 'Berkas tidak tersedia lagi';
-  return 'Gagal memuat';
+export function attachmentFailureText(
+  kind: AttachmentKind,
+  gone: boolean,
+  expired: boolean,
+  detail?: string | null,
+): string {
+  if (expired || gone) return attachmentUnreadableText(kind);
+  return detail?.trim() || 'Gagal memuat';
 }
 
 /**

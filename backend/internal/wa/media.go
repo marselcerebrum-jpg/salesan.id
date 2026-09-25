@@ -46,8 +46,13 @@ var (
 	ErrMediaNotReady = errors.New("wa: media is still being stored")
 )
 
-// MediaEnabled reports whether media can be stored and served.
-func (m *Manager) MediaEnabled() bool { return m.store != nil }
+// MediaEnabled reports whether media can be stored and served right now.
+//
+// Two conditions, not one: a backend must be configured, and its bucket must
+// have been confirmed. The second can be false for a while after boot and then
+// become true on its own, so anything that asks should ask again rather than
+// remember the answer.
+func (m *Manager) MediaEnabled() bool { return m.store != nil && m.mediaReady.Load() }
 
 // storageKey is the object key for one attachment.
 //
@@ -186,7 +191,7 @@ func (m *Manager) recordAttachment(
 // process-wide semaphore so a burst of incoming photos cannot exhaust the
 // network or the memory of the box.
 func (m *Manager) queueDownload(workspaceID, accountID, attachmentID uuid.UUID) {
-	if m.store == nil {
+	if !m.MediaEnabled() {
 		return
 	}
 	m.wg.Add(1)
@@ -241,7 +246,7 @@ func (m *Manager) broadcastAttachment(ctx context.Context, workspaceID, attachme
 // so two racing downloads write identical bytes to the same place, and the
 // second simply overwrites the first.
 func (m *Manager) EnsureStored(ctx context.Context, workspaceID, attachmentID uuid.UUID) (*repository.AttachmentLocation, error) {
-	if m.store == nil {
+	if !m.MediaEnabled() {
 		return nil, ErrMediaDisabled
 	}
 
@@ -275,6 +280,22 @@ func (m *Manager) EnsureStored(ctx context.Context, workspaceID, attachmentID uu
 		return nil, err
 	}
 
+	// Is this content already in the bucket under some other message?
+	//
+	// Asked before the connection is checked, and that ordering is deliberate
+	// twice over. A broadcast to sixty contacts produces sixty attachments
+	// sharing one file, and fifty-nine of them get their path from here without
+	// touching WhatsApp at all. It also means an account that has since gone
+	// offline can still show a file that was already stored, where before it
+	// reported "tidak terhubung" for a photo sitting in our own bucket.
+	if obj, err := m.repo.ClaimStoredObject(ctx, workspaceID, ref.FileSHA256, attachmentID); err != nil {
+		return nil, err
+	} else if obj != nil {
+		loc.StoragePath = &obj.StoragePath
+		loc.Status = models.AttachmentStored
+		return loc, nil
+	}
+
 	s, ok := m.Session(loc.AccountID)
 	if !ok || !s.IsConnected() {
 		return nil, ErrNotConnected
@@ -287,20 +308,6 @@ func (m *Manager) EnsureStored(ctx context.Context, workspaceID, attachmentID uu
 		mediaType = mediaTypeFor(loc.Kind)
 	}
 
-	data, err := s.client.DownloadMediaWithPath(
-		ctx, ref.DirectPath, ref.FileEncSHA256, ref.FileSHA256, ref.MediaKey,
-		mediaType, mmsType(mediaType), false,
-	)
-	if err != nil {
-		detail := truncate(err.Error(), 400)
-		_ = m.repo.MarkAttachmentStatus(ctx, attachmentID, models.AttachmentFailed, &detail)
-		if errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) ||
-			errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410) {
-			return nil, ErrMediaUnavailable
-		}
-		return nil, fmt.Errorf("download from whatsapp: %w", err)
-	}
-
 	contentType := "application/octet-stream"
 	if loc.MimeType != nil && *loc.MimeType != "" {
 		contentType = *loc.MimeType
@@ -309,18 +316,47 @@ func (m *Manager) EnsureStored(ctx context.Context, workspaceID, attachmentID uu
 	if loc.FileName != nil {
 		ext = path.Ext(*loc.FileName)
 	}
-	key := storageKey(workspaceID, loc.AccountID, loc.MessageID, 0, ext)
 
-	if err := m.store.UploadBytes(ctx, key, contentType, data); err != nil {
+	obj, err := storeOnce(ctx, m.repo, m.store, storeRequest{
+		WorkspaceID:  workspaceID,
+		AttachmentID: attachmentID,
+		SHA256:       ref.FileSHA256,
+		// Only reached by a ref with no content hash, which is a ref that could
+		// not have verified its own download either. Keyed the old way so such
+		// a file still lands somewhere sane rather than failing outright.
+		FallbackKey: storageKey(workspaceID, loc.AccountID, loc.MessageID, 0, ext),
+		ContentType: contentType,
+		Fetch: func(ctx context.Context) ([]byte, error) {
+			data, err := s.client.DownloadMediaWithPath(
+				ctx, ref.DirectPath, ref.FileEncSHA256, ref.FileSHA256, ref.MediaKey,
+				mediaType, mmsType(mediaType), false,
+			)
+			if err != nil {
+				// Labelled here so the recorded reason still says which half of
+				// the journey failed, now that fetching and uploading come back
+				// through one error path.
+				return nil, fmt.Errorf("download from whatsapp: %w", err)
+			}
+			return data, nil
+		},
+	})
+	if err != nil {
+		// Not a failure of this attachment: the bytes are on their way and the
+		// next request settles it. Marking it failed would stick a "berkas tidak
+		// tersedia" on a file that is fine.
+		if errors.Is(err, ErrMediaNotReady) {
+			return nil, err
+		}
 		detail := truncate(err.Error(), 400)
 		_ = m.repo.MarkAttachmentStatus(ctx, attachmentID, models.AttachmentFailed, &detail)
-		return nil, err
-	}
-	if err := m.repo.MarkAttachmentStored(ctx, attachmentID, key, int64(len(data))); err != nil {
+		if errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) ||
+			errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410) {
+			return nil, ErrMediaUnavailable
+		}
 		return nil, err
 	}
 
-	loc.StoragePath = &key
+	loc.StoragePath = &obj.StoragePath
 	loc.Status = models.AttachmentStored
 	return loc, nil
 }
@@ -423,7 +459,7 @@ type SendMediaInput struct {
 // A failure at step 3 leaves the row `failed` with the file already stored, so
 // retrying with the same client token re-sends without re-doing any of it.
 func (m *Manager) SendMedia(ctx context.Context, in SendMediaInput) (*models.Message, error) {
-	if m.store == nil {
+	if !m.MediaEnabled() {
 		return nil, ErrMediaDisabled
 	}
 
@@ -842,11 +878,47 @@ func truncate(s string, n int) string {
 // RemoveStoredMedia deletes files whose rows have gone, so the store does not
 // accumulate media nothing points at.
 func (m *Manager) RemoveStoredMedia(ctx context.Context, keys []string) {
-	m.removeStoredObjects(ctx, keys)
+	m.releaseAndRemove(ctx, keys, nil)
+}
+
+// releaseAndRemove deletes only the objects nothing points at any more.
+//
+// One object now serves every message that carries the same file, so a key
+// arriving here is not on its own a licence to delete. A broadcast to sixty
+// contacts shares one photo: clearing one of those conversations must not take
+// the photo away from the other fifty-nine. The database decides, by being
+// asked which of these keys still have an attachment referencing them.
+//
+// ignore names rows that are about to be settled but still reference their path,
+// which is the retention janitor's case: it empties the bucket before it marks
+// rows expired, so without naming them it would find every key still in use by
+// the batch it is expiring.
+func (m *Manager) releaseAndRemove(ctx context.Context, keys []string, ignore []uuid.UUID) {
+	if m.store == nil || len(keys) == 0 {
+		return
+	}
+	free, err := m.repo.ReleaseStorageObjects(ctx, keys, ignore)
+	if err != nil {
+		// Nothing is deleted when the question cannot be answered. Leaving a
+		// file behind costs disk; deleting one that is still in use costs the
+		// picture in somebody's chat, and only one of those is recoverable.
+		m.log.Warn("check which media objects are still referenced", "err", err)
+		return
+	}
+	if kept := len(keys) - len(free); kept > 0 {
+		m.log.Info("media objects kept because other messages still use them",
+			"kept", kept, "removing", len(free))
+	}
+	m.removeStoredObjects(ctx, free)
 }
 
 // removeStoredObjects deletes a batch of objects, chunked to stay inside the
 // backend's limits.
+//
+// Unconditional: it asks nobody whether the file is still wanted. Attachment
+// media must not come here directly, because one object now serves every message
+// carrying the same file — use releaseAndRemove, which checks first. Key spaces
+// with one owner, such as an application logo, are safe to delete outright.
 func (m *Manager) removeStoredObjects(ctx context.Context, keys []string) {
 	if m.store == nil || len(keys) == 0 {
 		return
@@ -866,17 +938,79 @@ func (m *Manager) removeStoredObjects(ctx context.Context, keys []string) {
 
 // ensureStorage prepares wherever media is going to live, so a fresh install
 // works without a manual step.
+//
+// A failure here is temporary until proven otherwise. The bucket lives behind a
+// service that itself needs the database, and the whole stack does not come up
+// in a fixed order: this process can easily be ready before the thing it is
+// asking. Refusing media for the rest of the process's life over one early
+// "no" is how sending a photo stayed broken long after the cause was gone.
 func (m *Manager) ensureStorage(ctx context.Context) {
 	if m.store == nil {
 		m.log.Error("media storage unavailable: photo, video and document messages will be refused")
 		return
 	}
-	if err := m.store.EnsureReady(ctx); err != nil {
-		m.log.Error("prepare media storage", "backend", m.store.Name(), "err", err)
-		m.store = nil // refuse cleanly rather than fail mid-upload
+	if m.tryStorage(ctx, 1) {
 		return
 	}
-	m.log.Info("media storage ready", "backend", m.store.Name())
+	m.retryStorage()
+}
+
+// tryStorage runs the readiness check once and records the outcome.
+func (m *Manager) tryStorage(ctx context.Context, attempt int) bool {
+	if err := m.store.EnsureReady(ctx); err != nil {
+		m.log.Error("prepare media storage",
+			"backend", m.store.Name(), "attempt", attempt, "err", err)
+		return false
+	}
+	m.mediaReady.Store(true)
+	if attempt > 1 {
+		m.log.Info("media storage ready", "backend", m.store.Name(), "after_attempts", attempt)
+	} else {
+		m.log.Info("media storage ready", "backend", m.store.Name())
+	}
+	return true
+}
+
+// storageRetryDelay is how long to wait before asking the bucket again.
+//
+// Quick at first, because the usual cause is a service still starting a few
+// seconds behind this one. Then slower, because the other cause is a genuine
+// misconfiguration, and hammering a broken endpoint every ten seconds forever
+// only fills the log.
+func storageRetryDelay(attempt int) time.Duration {
+	const most = 5 * time.Minute
+	d := storageRetryBase << uint(min(attempt, 6))
+	if d > most {
+		return most
+	}
+	return d
+}
+
+// storageRetryBase is the first wait, and a variable only so the test for the
+// retry loop does not have to sit through half a minute of real waiting.
+var storageRetryBase = 10 * time.Second
+
+// retryStorage keeps asking until the bucket answers, then stops for good.
+func (m *Manager) retryStorage() {
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for attempt := 2; ; attempt++ {
+			timer := time.NewTimer(storageRetryDelay(attempt - 2))
+			select {
+			case <-m.rootCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			ctx, cancel := context.WithTimeout(m.rootCtx, 30*time.Second)
+			ok := m.tryStorage(ctx, attempt)
+			cancel()
+			if ok {
+				return
+			}
+		}
+	}()
 }
 
 // LocalStore returns the filesystem backend when that is what is in use, so

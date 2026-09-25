@@ -47,7 +47,7 @@ func campaignDocKey(workspaceID, docID uuid.UUID, ext string) string {
 func (m *Manager) UploadCampaignDocument(
 	ctx context.Context, workspaceID uuid.UUID, file media.File, src io.Reader, size int64,
 ) (string, error) {
-	if m.store == nil {
+	if !m.MediaEnabled() {
 		return "", ErrMediaDisabled
 	}
 	if size > MaxCampaignDocumentBytes {

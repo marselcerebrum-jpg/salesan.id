@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,7 +58,21 @@ type Manager struct {
 	// store is where media bytes live — Supabase or the local disk. Never nil
 	// in practice; the nil checks remain so a misconfiguration degrades to
 	// "media unavailable" rather than a panic.
+	//
+	// Written once at construction and never again. Readiness is tracked beside
+	// it instead, because the bucket can be unreachable at boot and fine ten
+	// minutes later, and swapping the field from a retry goroutine would be a
+	// data race against every media operation in the process.
 	store storage.Backend
+	// mediaReady is whether the bucket has been confirmed to exist.
+	//
+	// False until the check passes, and it keeps being retried until it does.
+	// The first version gave up after one attempt and disabled media for the
+	// life of the process: the backend happened to start while Postgres was
+	// down, the storage service could not answer, and sending a photo stayed
+	// broken for hours after everything else had recovered — with nothing in
+	// the interface to suggest a restart was what it needed.
+	mediaReady atomic.Bool
 	// mediaSem bounds concurrent media downloads across every account, so a
 	// group dumping fifty photos cannot saturate the connection.
 	mediaSem chan struct{}

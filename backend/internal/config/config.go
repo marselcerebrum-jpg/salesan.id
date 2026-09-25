@@ -136,6 +136,19 @@ type Config struct {
 	// running them all at once would pin every core and stall the inbox. Three
 	// is the middle: a four-core server keeps one core for everything else.
 	CampaignStoryConcurrency int
+	// MediaRetentionDays is how long a file stays in our bucket.
+	//
+	// Separate from the account's sync window on purpose, and much shorter. The
+	// window decides how far back the inbox shows messages; this decides how
+	// long we keep the bytes. Thirty-seven connected numbers bring in around
+	// forty-five gigabytes of video a day, so holding media for the whole
+	// seven-day window needs roughly three hundred gigabytes — more than the
+	// disk, which is how the disk filled and took Postgres down with it.
+	//
+	// The message never disappears. Only our copy of the file does, and it is
+	// still in the chat on the phone, which is what the bubble says once the
+	// file is gone.
+	MediaRetentionDays int
 	// CampaignSendTimeout bounds one Broadcast send.
 	//
 	// whatsmeow waits for the server's acknowledgement with no deadline of its
@@ -251,6 +264,7 @@ func Load() (*Config, error) {
 		// to keep answering while a large broadcast runs.
 		CampaignSendConcurrency:  integer("CAMPAIGN_SEND_CONCURRENCY", 6),
 		CampaignStoryConcurrency: integer("CAMPAIGN_STORY_CONCURRENCY", 3),
+		MediaRetentionDays:       integer("MEDIA_RETENTION_DAYS", 2),
 		CampaignSendTimeout:      duration("CAMPAIGN_SEND_TIMEOUT", 2*time.Minute),
 		CampaignStoryTimeout:     duration("CAMPAIGN_STORY_TIMEOUT", 45*time.Minute),
 		CampaignOfflineGrace:     duration("CAMPAIGN_OFFLINE_GRACE", 30*time.Minute),

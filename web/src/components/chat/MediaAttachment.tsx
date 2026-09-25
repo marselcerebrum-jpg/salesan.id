@@ -25,7 +25,12 @@ import {
   stickerBoxStyle,
   thumbnailSrc,
 } from '@/lib/media';
-import { attachmentFailureText, useAttachmentUrl, useOnScreen } from '@/lib/useAttachmentUrl';
+import {
+  attachmentFailureText,
+  attachmentUnreadableText,
+  useAttachmentUrl,
+  useOnScreen,
+} from '@/lib/useAttachmentUrl';
 import type { Attachment } from '@/lib/types';
 
 interface MediaAttachmentProps {
@@ -61,7 +66,8 @@ export function MediaAttachment({ attachment, onOpen, hasCaption }: MediaAttachm
 
 function ImageAttachment({ attachment, onOpen, hasCaption }: MediaAttachmentProps) {
   const [ref, onScreen] = useOnScreen<HTMLButtonElement>();
-  const { url, loading, error, gone, expired, reload } = useAttachmentUrl(attachment, onScreen);
+  const { url, loading, error, gone, expired, reload, reportUnreadable } =
+    useAttachmentUrl(attachment, onScreen);
   const thumb = thumbnailSrc(attachment);
   const isSticker = attachment.kind === 'sticker';
 
@@ -91,6 +97,11 @@ function ImageAttachment({ attachment, onOpen, hasCaption }: MediaAttachmentProp
         <img
           src={src}
           alt={attachment.file_name ?? 'Gambar'}
+          // The row can say the file is stored while the object has gone from
+          // the bucket. Nothing on the server notices; the browser is what
+          // finds out, so it says so instead of leaving a broken frame with no
+          // explanation on it.
+          onError={url && src === url ? reportUnreadable : undefined}
           className={clsx(
             'h-full w-full',
             isSticker ? 'object-contain' : 'object-cover',
@@ -106,7 +117,10 @@ function ImageAttachment({ attachment, onOpen, hasCaption }: MediaAttachmentProp
       {loading && !url ? <Veil><Loader2 className="size-6 animate-spin text-white" /></Veil> : null}
       {error ? (
         <Veil>
-          <Failure message={attachmentFailureText(gone, expired)} onRetry={gone ? undefined : reload} />
+          <Failure
+            message={attachmentFailureText(attachment.kind, gone, expired, error)}
+            onRetry={gone ? undefined : reload}
+          />
         </Veil>
       ) : null}
     </button>
@@ -152,7 +166,7 @@ function VideoAttachment({ attachment, onOpen, hasCaption }: MediaAttachmentProp
       {error ? (
         <Veil>
           <Failure
-            message={expired ? attachmentFailureText(gone, expired) : gone ? 'Video tidak tersedia lagi' : 'Gagal memuat'}
+            message={attachmentFailureText(attachment.kind, gone, expired, error)}
             onRetry={gone ? undefined : reload}
           />
         </Veil>
@@ -181,13 +195,7 @@ function AudioAttachment({ attachment }: { attachment: Attachment }) {
         <audio src={url} controls preload="metadata" className="h-9 w-full max-w-[320px]" />
       ) : error ? (
         <Failure
-          message={
-            expired
-              ? attachmentFailureText(gone, expired)
-              : gone
-                ? 'Audio tidak tersedia lagi'
-                : 'Gagal memuat audio'
-          }
+          message={attachmentFailureText(attachment.kind, gone, expired, error)}
           onRetry={gone ? undefined : reload}
           tone="dark"
         />
@@ -286,11 +294,16 @@ function ExpiredAttachment({ attachment }: { attachment: Attachment }) {
     <div className="mb-[2px] w-[min(320px,100%)] rounded-md border border-dashed border-wa-text-2/30 bg-black/[0.03] px-3 py-3 dark:bg-white/[0.04]">
       <p className="flex items-center gap-2 text-sm text-wa-text-2">
         <Clock3 className="size-4 shrink-0" />
-        Berkas sudah expired, silakan cek di HP
+        {attachmentUnreadableText(attachment.kind)}
       </p>
+      {/*
+        No number of days. How long a file is kept is a server setting, and a
+        sentence naming it here is wrong the day it is changed. What the reader
+        needs is that the message is intact and the file is on the phone.
+      */}
       <p className="mt-1 text-2xs text-wa-text-2">
-        {label} disimpan di sini selama 7 hari, lalu dihapus dari server. Pesannya tetap ada di
-        WhatsApp pada HP Anda.
+        {label} hanya disimpan sementara di server, lalu dihapus. Pesannya tetap ada di WhatsApp
+        pada HP Anda.
         {attachment.file_name ? ` (${attachment.file_name})` : ''}
       </p>
     </div>

@@ -77,9 +77,12 @@ func writeAppError(w http.ResponseWriter, err error) {
 	case errors.Is(err, wa.ErrMediaUnavailable):
 		writeError(w, http.StatusGone, "media_unavailable",
 			"Berkas ini sudah tidak tersedia di server WhatsApp.")
+	// Deliberately without a number of days. The window is a server setting, and
+	// a sentence that names it here goes quietly wrong the moment it is changed.
+	// What the reader needs is not the policy but where the file still is.
 	case errors.Is(err, wa.ErrMediaExpired):
 		writeError(w, http.StatusGone, "media_expired",
-			"Berkas ini sudah dihapus karena lewat batas penyimpanan 7 hari.")
+			"Berkas ini sudah dihapus dari server. Silakan cek di HP.")
 	// 409, not 410. The file is coming; the browser should wait and ask again
 	// rather than draw a dead end over a message that was sent successfully.
 	case errors.Is(err, wa.ErrMediaNotReady):

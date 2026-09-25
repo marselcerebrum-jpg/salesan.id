@@ -211,7 +211,7 @@ func (m *Manager) RevokeMessage(ctx context.Context, workspaceID, messageID uuid
 	if err != nil {
 		return nil, err
 	}
-	m.removeStoredObjects(ctx, keys)
+	m.releaseAndRemove(ctx, keys, nil)
 	if updated == nil {
 		return nil, repository.ErrNotFound
 	}
@@ -241,7 +241,7 @@ func (m *Manager) HideMessage(ctx context.Context, workspaceID, messageID uuid.U
 	if err != nil {
 		return nil, pushed, err
 	}
-	m.removeStoredObjects(ctx, keys)
+	m.releaseAndRemove(ctx, keys, nil)
 
 	if err := m.repo.RefreshConversationHead(ctx, conversationID); err != nil {
 		m.log.Warn("refresh head after hide", "conversation_id", conversationID, "err", err)
@@ -365,7 +365,7 @@ func (s *Session) handleMessageRevoke(ctx context.Context, evt *events.Message) 
 		s.log.Warn("apply incoming revoke", "wa_id", targetID, "err", err)
 		return
 	}
-	s.mgr.removeStoredObjects(ctx, keys)
+	s.mgr.releaseAndRemove(ctx, keys, nil)
 
 	// A deleted Status may be one the Story scheduler published. Ending its
 	// publication here is what keeps the Story report from going on claiming it

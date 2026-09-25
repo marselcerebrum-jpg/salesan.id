@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR, { mutate } from 'swr';
 
 import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
-import { useAttachmentUrl } from '@/lib/useAttachmentUrl';
+import { attachmentUnreadableText, useAttachmentUrl } from '@/lib/useAttachmentUrl';
 import {
   fetcher,
   markStatusSeen,
@@ -553,7 +553,7 @@ function StatusMedia({ post, onReady }: { post: StatusPost; onReady: () => void 
         <Loader2 className="size-6 animate-spin text-wa-text-2" />
       ) : gone || expired ? (
         <p className="text-sm text-wa-text-2">
-          {expired ? 'Berkas sudah expired, silakan cek di HP' : 'Berkas tidak tersedia lagi'}
+          {attachmentUnreadableText(post.type === 'video' ? 'video' : 'image')}
         </p>
       ) : url && post.type === 'video' ? (
         <video

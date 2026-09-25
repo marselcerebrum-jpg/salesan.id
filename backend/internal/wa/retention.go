@@ -24,10 +24,11 @@ const (
 // startMediaJanitor deletes stored media once it falls outside the retention
 // window.
 //
-// The window is the account's own sync window — seven days by default — so it
-// matches what the inbox actually shows. Keeping files for chats that have
-// already scrolled out of range would grow the bucket without bound and keep
-// customer photos on disk long after there is any reason to hold them.
+// The window is MEDIA_RETENTION_DAYS, or the account's own sync window when that
+// is shorter — media is never kept past the point the inbox stops showing its
+// message. Keeping files for chats that have already scrolled out of range would
+// grow the bucket without bound and keep customer photos on disk long after
+// there is any reason to hold them.
 func (m *Manager) startMediaJanitor() {
 	if m.store == nil {
 		return // nothing is being stored, so nothing needs sweeping
@@ -74,7 +75,8 @@ func (m *Manager) sweepExpiredMedia() {
 		if ctx.Err() != nil {
 			return
 		}
-		cutoff := time.Now().AddDate(0, 0, -t.WindowDays)
+		days := mediaWindowDays(t.WindowDays, m.cfg.MediaRetentionDays)
+		cutoff := time.Now().AddDate(0, 0, -days)
 		n, err := m.expireMediaFor(ctx, t.AccountID, cutoff)
 		if err != nil {
 			m.log.Warn("expire media", "account_id", t.AccountID, "err", err)
@@ -82,9 +84,29 @@ func (m *Manager) sweepExpiredMedia() {
 		}
 		if n > 0 {
 			m.log.Info("expired media removed",
-				"account_id", t.AccountID, "files", n, "window_days", t.WindowDays)
+				"account_id", t.AccountID, "files", n, "window_days", days)
 		}
 	}
+}
+
+// mediaWindowDays is how long this account's files are kept.
+//
+// The shorter of the two windows wins. Media is never kept past the point the
+// inbox stops showing its message, and it is not kept for the whole window
+// either: the bytes are what fills the disk, and the file is the one part of a
+// message that still exists on the phone afterwards.
+//
+// A limit of zero or less means the setting is not in use, and the account's own
+// window applies — a misread environment variable must not silently start
+// deleting everything.
+func mediaWindowDays(windowDays, limit int) int {
+	if windowDays < 1 {
+		windowDays = 1
+	}
+	if limit > 0 && limit < windowDays {
+		return limit
+	}
+	return windowDays
 }
 
 // sweepExpiredStatuses removes Status posts past their 24 hours.
@@ -108,10 +130,14 @@ func (m *Manager) sweepExpiredStatuses(ctx context.Context) {
 			break
 		}
 		keys := make([]string, 0, len(batch))
+		ids := make([]uuid.UUID, 0, len(batch))
 		for _, a := range batch {
 			keys = append(keys, a.StoragePath)
+			ids = append(ids, a.ID)
 		}
-		m.removeStoredObjects(ctx, keys)
+		// Same shape as the retention sweep below: these rows still point at
+		// their files here, and are deleted a few lines further down.
+		m.releaseAndRemove(ctx, keys, ids)
 		if len(batch) < retentionBatch || ctx.Err() != nil {
 			break
 		}
@@ -154,7 +180,11 @@ func (m *Manager) expireMediaFor(ctx context.Context, accountID uuid.UUID, cutof
 			ids = append(ids, a.ID)
 		}
 
-		m.removeStoredObjects(ctx, keys)
+		// The batch's own rows still point at these keys at this moment, so they
+		// are named as the ones to disregard. Any other attachment referencing
+		// the same file — a broadcast sibling, or a copy in another account of
+		// this workspace — keeps it.
+		m.releaseAndRemove(ctx, keys, ids)
 		if _, err := m.repo.MarkAttachmentsExpired(ctx, ids); err != nil {
 			return total, err
 		}

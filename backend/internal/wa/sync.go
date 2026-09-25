@@ -140,7 +140,9 @@ func (m *Manager) SyncAccount(ctx context.Context, accountID uuid.UUID, opts Syn
 			s.log.Warn("prune old messages", "err", err)
 		} else {
 			res.Pruned = pruned
-			s.mgr.removeStoredObjects(ctx, keys)
+			// The message rows are gone, so whatever still references these
+			// files is something outside the pruned window and keeps them.
+			s.mgr.releaseAndRemove(ctx, keys, nil)
 		}
 	}
 

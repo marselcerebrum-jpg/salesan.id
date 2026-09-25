@@ -30,7 +30,7 @@ const appIconPrefix = "app-icons/"
 func (m *Manager) UploadAppIcon(
 	ctx context.Context, workspaceID, applicationID uuid.UUID, file media.File, src io.Reader, size int64,
 ) (string, error) {
-	if m.store == nil {
+	if !m.MediaEnabled() {
 		return "", ErrMediaDisabled
 	}
 	key := AppIconKey(workspaceID, applicationID, file.MIME)
