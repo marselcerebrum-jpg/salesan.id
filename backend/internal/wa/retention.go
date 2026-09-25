@@ -19,6 +19,13 @@ const (
 	// retentionBatch bounds one account's work per sweep. A backlog is cleared
 	// over several passes rather than in one long transaction.
 	retentionBatch = 200
+	// retentionMaxPasses stops a sweep that is not getting anywhere.
+	//
+	// A paged loop whose pages stop advancing is an infinite loop wearing a
+	// sensible shape, and this one was exactly that for weeks. The bug is fixed;
+	// the bound stays, because the next version of that mistake should end as a
+	// short log line rather than as a sweep that silently never finishes.
+	retentionMaxPasses = 2000
 )
 
 // startMediaJanitor deletes stored media once it falls outside the retention
@@ -60,10 +67,16 @@ func (m *Manager) startMediaJanitor() {
 // account still has files in the bucket, and it is precisely the account nobody
 // is watching that must not keep customer photos indefinitely.
 func (m *Manager) sweepExpiredMedia() {
+	// A budget each. Sharing one meant the sweep that ran first could spend all
+	// of it and leave the other with nothing, which is what happened: chat media
+	// was never once swept, because the Status sweep in front of it never
+	// finished. Neither can starve the other now.
+	statusCtx, cancelStatus := context.WithTimeout(m.rootCtx, 5*time.Minute)
+	m.sweepExpiredStatuses(statusCtx)
+	cancelStatus()
+
 	ctx, cancel := context.WithTimeout(m.rootCtx, 10*time.Minute)
 	defer cancel()
-
-	m.sweepExpiredStatuses(ctx)
 
 	targets, err := m.repo.AccountsWithStoredMedia(ctx)
 	if err != nil {
@@ -120,7 +133,8 @@ func mediaWindowDays(windowDays, limit int) int {
 // Files leave the bucket before the rows leave the database. The other order
 // would drop the only pointer to an object and leave it in the bucket for good.
 func (m *Manager) sweepExpiredStatuses(ctx context.Context) {
-	for {
+	files := 0
+	for pass := 0; pass < retentionMaxPasses; pass++ {
 		batch, err := m.repo.ExpiredStatusAttachments(ctx, retentionBatch)
 		if err != nil {
 			m.log.Warn("list expired status media", "err", err)
@@ -135,12 +149,29 @@ func (m *Manager) sweepExpiredStatuses(ctx context.Context) {
 			keys = append(keys, a.StoragePath)
 			ids = append(ids, a.ID)
 		}
-		// Same shape as the retention sweep below: these rows still point at
-		// their files here, and are deleted a few lines further down.
+		// These rows still point at their files here, so the batch names itself
+		// as the thing to disregard when asking what is still in use.
 		m.releaseAndRemove(ctx, keys, ids)
+
+		// The rows must stop pointing at the files before the next page is
+		// asked for. Without this the same two hundred rows come back every
+		// time — the listing is "status media that still has a storage path",
+		// and removing the object does not change that. The loop then spun
+		// until its ten minutes ran out, the row deletion below never ran, and
+		// the media retention sweep after it never got a turn. Ninety-two
+		// gigabytes of day-old Status video sat there for that reason alone.
+		if _, err := m.repo.MarkAttachmentsExpired(ctx, ids); err != nil {
+			m.log.Warn("settle expired status media", "err", err)
+			break
+		}
+		files += len(batch)
+
 		if len(batch) < retentionBatch || ctx.Err() != nil {
 			break
 		}
+	}
+	if files > 0 {
+		m.log.Info("expired status media removed", "files", files)
 	}
 
 	n, err := m.repo.DeleteExpiredStatuses(ctx)
@@ -164,7 +195,10 @@ func (m *Manager) sweepExpiredStatuses(ctx context.Context) {
 func (m *Manager) expireMediaFor(ctx context.Context, accountID uuid.UUID, cutoff time.Time) (int, error) {
 	total := 0
 
-	for {
+	// Bounded like the Status sweep. This loop does advance — marking the batch
+	// expired clears its storage paths, so the next page is a different page —
+	// but a paged loop with no ceiling is one query change away from spinning.
+	for pass := 0; pass < retentionMaxPasses; pass++ {
 		batch, err := m.repo.AttachmentsPastRetention(ctx, accountID, cutoff, retentionBatch)
 		if err != nil {
 			return total, err
@@ -198,4 +232,7 @@ func (m *Manager) expireMediaFor(ctx context.Context, accountID uuid.UUID, cutof
 			return total, ctx.Err()
 		}
 	}
+	// The ceiling was reached with work still to do. Not an error: the next
+	// hourly sweep carries on from where this one stopped.
+	return total, nil
 }
