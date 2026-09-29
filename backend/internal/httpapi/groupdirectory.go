@@ -41,9 +41,44 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+
+	// One extra query for the whole page rather than one per row. A failure
+	// here costs the badges and nothing else: the directory is still a
+	// directory without them, and refusing the page over a decoration would be
+	// a poor trade.
+	jids := make([]string, 0, len(groups))
+	for _, g := range groups {
+		jids = append(jids, g.ChatJID)
+	}
+	if deltas, err := s.repo.GroupMemberDeltaToday(r.Context(), user.WorkspaceID, jids); err != nil {
+		s.log.Warn("read today's group member changes", "err", err)
+	} else {
+		for i := range groups {
+			groups[i].DeltaToday = deltas[groups[i].ChatJID]
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groups": groups, "total": total, "fetched": fetched,
 	})
+}
+
+// handleGroupMemberHistory returns one group's head count day by day.
+func (s *Server) handleGroupMemberHistory(w http.ResponseWriter, r *http.Request) {
+	user := userFrom(r.Context())
+	chatJID := strings.TrimSpace(r.URL.Query().Get("chat_jid"))
+	if chatJID == "" {
+		writeError(w, http.StatusBadRequest, "missing_group", "Grup tidak disebutkan")
+		return
+	}
+	days := queryInt(r, "days", 30)
+
+	history, err := s.repo.GroupMemberHistory(r.Context(), user.WorkspaceID, chatJID, days)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"days": history})
 }
 
 func (s *Server) handleGroupDirectoryFacets(w http.ResponseWriter, r *http.Request) {

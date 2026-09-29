@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { FilterChips } from '@/components/contacts/FilterChips';
+import { MemberHistoryPanel } from '@/components/groups/MemberHistoryPanel';
 import { EmptyState, ErrorNote, Spinner } from '@/components/ui/Primitives';
 import {
   exportGroups,
@@ -121,6 +122,10 @@ export default function GroupsPage() {
       return next;
     });
   }
+
+  // Which group's history is open, or none. The row is held rather than the
+  // JID so the panel can title itself without looking the name up again.
+  const [historyOf, setHistoryOf] = useState<GroupRow | null>(null);
 
   const allOnPagePicked = groups.length > 0 && groups.every((g) => picked.has(g.chat_jid));
 
@@ -376,6 +381,9 @@ export default function GroupsPage() {
                   const checked = picked.has(group.chat_jid);
                   const single = group.accounts[0];
                   const label = group.name || group.chat_jid;
+                  // A server that does not know about this field sends nothing,
+                  // and "nothing" has to mean "no change", not "NaN".
+                  const delta = Number.isFinite(group.delta_today) ? group.delta_today! : 0;
                   const href = groupDetailHref(group.chat_jid);
                   return (
                     <tr
@@ -406,6 +414,23 @@ export default function GroupsPage() {
                           >
                             {label}
                           </Link>
+                          {delta !== 0 ? (
+                            /* Only when something moved. A "+0" on nine hundred
+                               rows is nine hundred pieces of furniture, and the
+                               few groups that did move stop standing out. */
+                            <span
+                              title={`Perubahan anggota hari ini: ${delta > 0 ? '+' : ''}${delta}`}
+                              className={clsx(
+                                'nums rounded-full px-2 py-0.5 text-2xs font-medium',
+                                delta > 0
+                                  ? 'bg-brand-600/12 text-brand-800'
+                                  : 'bg-danger-soft text-danger',
+                              )}
+                            >
+                              {delta > 0 ? '+' : '−'}
+                              {Math.abs(delta).toLocaleString('id-ID')}
+                            </span>
+                          ) : null}
                           {!group.fetched ? (
                             <span className="rounded-full bg-warn-soft px-2 py-0.5 text-2xs font-medium text-warn">
                               anggota belum diambil
@@ -427,7 +452,22 @@ export default function GroupsPage() {
                         </span>
                       </Td>
                       <Td className="nums text-right text-ink-soft">
-                        {group.fetched ? group.member_count.toLocaleString('id-ID') : '–'}
+                        {group.fetched ? (
+                          /* The number is the control. It is what the question
+                             "how did it get to this" is about, so it is what
+                             opens the answer, rather than a separate icon
+                             nobody would connect to it. */
+                          <button
+                            type="button"
+                            onClick={() => setHistoryOf(group)}
+                            aria-label={`Riwayat anggota ${label} per hari`}
+                            className="rounded px-1 underline decoration-dotted underline-offset-4 transition-colors hover:text-ink"
+                          >
+                            {group.member_count.toLocaleString('id-ID')}
+                          </button>
+                        ) : (
+                          '–'
+                        )}
                       </Td>
                       <Td>
                         <Link
@@ -466,6 +506,13 @@ export default function GroupsPage() {
           </div>
         ) : null}
       </div>
+
+      <MemberHistoryPanel
+        open={historyOf !== null}
+        onClose={() => setHistoryOf(null)}
+        chatJid={historyOf?.chat_jid ?? ''}
+        groupName={historyOf?.name || historyOf?.chat_jid || ''}
+      />
     </div>
   );
 }

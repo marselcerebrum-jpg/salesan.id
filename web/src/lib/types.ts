@@ -252,7 +252,29 @@ export interface GroupRow {
    * row says which.
    */
   fetched: boolean;
+  /**
+   * Arrivals minus departures since midnight in Jakarta.
+   *
+   * Zero means both "nobody moved" and "as many left as joined". The badge
+   * shows one number by design, so it treats them the same; the day-by-day
+   * history behind the member count is where they come apart.
+   *
+   * Optional because a server older than this field simply does not send it.
+   * The web and the API are separate containers and never restart in the same
+   * instant, so every deploy has a window where this page is newer than the
+   * thing it is talking to. Reading it as a number regardless produced a badge
+   * reading "−NaN" on every row.
+   */
+  delta_today?: number;
   accounts: GroupAccount[];
+}
+
+/** One day in a group's head count. */
+export interface GroupMemberDay {
+  day: string;
+  member_count: number;
+  joined: number;
+  left: number;
 }
 
 /** One participant of a group, merged across the numbers that can see them. */

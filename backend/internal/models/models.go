@@ -214,8 +214,14 @@ type GroupRow struct {
 	// Fetched is false until the member list has been pulled from WhatsApp.
 	// Said plainly on the row: a member count of zero because nobody has looked
 	// is a different fact from a group that is genuinely empty.
-	Fetched  bool           `json:"fetched"`
-	Accounts []GroupAccount `json:"accounts"`
+	Fetched bool `json:"fetched"`
+	// DeltaToday is arrivals minus departures since midnight in Jakarta.
+	//
+	// Zero covers both "nothing happened" and "as many left as joined", which
+	// the badge treats the same because it shows one number by design. The
+	// per-day history is where the two are told apart.
+	DeltaToday int            `json:"delta_today"`
+	Accounts   []GroupAccount `json:"accounts"`
 }
 
 // ContactFacets powers both chip rows.

@@ -27,6 +27,7 @@ import type {
   ConversationCounts,
   GroupDirectoryMember,
   GroupMember,
+  GroupMemberDay,
   GroupRow,
   ImportResult,
   Label,
@@ -1718,6 +1719,24 @@ export function groupMembersPath(chatJid: string) {
 export interface GroupDetail {
   group: GroupRow;
   members: GroupDirectoryMember[];
+}
+
+/**
+ * One group's head count, day by day.
+ *
+ * A path rather than a fetch so the panel can hand it to SWR and get caching
+ * and revalidation for free, the same way the member list does.
+ *
+ * Days with nothing recorded are absent from the answer, and that is
+ * deliberate: this only began being recorded when the feature shipped, and a
+ * gap has to look like a gap rather than like a day the group lost everybody.
+ */
+export function groupMemberHistoryPath(chatJid: string, days = 30) {
+  return `/groups/members/history?chat_jid=${encodeURIComponent(chatJid)}&days=${days}`;
+}
+
+export interface GroupMemberHistory {
+  days: GroupMemberDay[];
 }
 
 /** The detail page's own route, for linking a directory row to it. */

@@ -91,6 +91,9 @@ func (s *Session) handleEvent(rawEvt any) {
 	case *events.AppStateSyncError:
 		go s.handleAppStateSyncError(evt)
 
+	case *events.GroupInfo:
+		s.handleGroupInfo(evt)
+
 	case *events.OfflineSyncCompleted:
 		s.log.Info("offline sync completed", "count", evt.Count)
 	}

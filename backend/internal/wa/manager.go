@@ -194,6 +194,7 @@ func (m *Manager) Bootstrap(ctx context.Context) error {
 	// failure here is logged, not fatal: chat must still work.
 	m.ensureStorage(ctx)
 	m.startMediaJanitor()
+	m.startGroupSnapshot()
 	// Repairs derived reporting rows that a lost event or a restart left
 	// behind. Independent of any live session: the conversations that most
 	// need repairing belong to the account that was disconnected.

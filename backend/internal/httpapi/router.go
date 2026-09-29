@@ -216,6 +216,8 @@ func (s *Server) Handler() http.Handler {
 				// One group and its participants, for the group's own page.
 				r.Get("/members", s.handleGroupDirectoryMembers)
 				r.Get("/members/export", s.handleExportGroupMembers)
+				// The member count day by day, behind the count itself.
+				r.Get("/members/history", s.handleGroupMemberHistory)
 				r.Post("/refresh", s.handleRefreshOneGroup)
 				r.Get("/export", s.handleExportGroups)
 				// Pulls member lists a batch at a time and reports what is
