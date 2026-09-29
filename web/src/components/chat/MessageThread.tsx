@@ -44,7 +44,8 @@ import {
   jidToDisplay,
 } from '@/lib/format';
 import { filesFromClipboard, nameClipboardFile } from '@/lib/media';
-import { fetcher, markQuickReplyUsed } from '@/lib/api';
+import { fetcher, markQuickReplyUsed, updateGroupMember } from '@/lib/api';
+import type { GroupMemberAction } from '@/lib/api';
 import type {
   Attachment,
   Conversation,
@@ -256,11 +257,43 @@ export function MessageThread({
   // Group members, fetched only for groups and only to put names on mentions.
   // Without it a mention renders as "@6285171593270", which is correct but not
   // what anyone reading the chat is looking for.
-  const { data: memberData } = useSWR<{ members: GroupMember[] }>(
+  const { data: memberData, mutate: mutateMembers } = useSWR<{ members: GroupMember[] }>(
     conversation && conversation.type === 'group'
       ? `/conversations/${conversation.id}/members`
       : null,
     fetcher,
+  );
+
+  /**
+   * Participants by the user part of their address.
+   *
+   * WhatsApp writes the same person as a number in one place and as a LID in
+   * another, so a message's sender and the group's participant list often do
+   * not match character for character. Everything here keys on the part before
+   * the "@", which is what the two forms share, and the row that comes back
+   * carries the JID the group itself uses — the only one WhatsApp accepts when
+   * removing or promoting somebody.
+   */
+  const membersByUser = useMemo(() => {
+    const byUser = new Map<string, GroupMember>();
+    for (const member of memberData?.members ?? []) {
+      const user = member.jid.split('@')[0]?.split(':')[0];
+      if (user) byUser.set(user, member);
+    }
+    return byUser;
+  }, [memberData]);
+
+  const senderMember = useCallback(
+    (message: Message) => {
+      const mayManage =
+        conversation?.type === 'group' && Boolean(conversation.self_is_admin);
+      if (!mayManage || message.from_me) return null;
+      const user = message.sender_jid?.split('@')[0]?.split(':')[0];
+      if (!user) return null;
+      const member = membersByUser.get(user);
+      return member ? { jid: member.jid, isAdmin: member.is_admin } : null;
+    },
+    [conversation?.type, conversation?.self_is_admin, membersByUser],
   );
 
   const memberNames = useMemo(() => {
@@ -398,6 +431,11 @@ export function MessageThread({
           onConfirm: () => onDeleteMessage(message, 'everyone'),
         });
         break;
+      case 'promote':
+      case 'demote':
+      case 'kick':
+        void manageSender(message, action);
+        break;
       case 'delete-me':
         confirm.ask({
           title: 'Hapus untuk saya?',
@@ -409,6 +447,45 @@ export function MessageThread({
         });
         break;
     }
+  }
+
+  /**
+   * Promotes, demotes or removes the person who sent this message.
+   *
+   * Only removal is confirmed. Making somebody an admin is undone by demoting
+   * them a second later; removing them from a group of several hundred is not
+   * undone at all, and they are told about it by WhatsApp.
+   */
+  async function manageSender(message: Message, action: 'promote' | 'demote' | 'kick') {
+    const target = senderMember(message);
+    if (!conversation || !target) return;
+
+    const who = message.display_name ?? 'anggota ini';
+    const run = async (verb: GroupMemberAction) => {
+      try {
+        // The answer carries the whole participant list, so the menu's idea of
+        // who is an admin is corrected by the same request that changed it.
+        const res = await updateGroupMember(conversation.id, target.jid, verb);
+        await mutateMembers(res, { revalidate: false });
+      } catch (err) {
+        setPickError(err instanceof Error ? err.message : 'Tindakan gagal.');
+      }
+    };
+
+    if (action === 'kick') {
+      confirm.ask({
+        title: `Keluarkan ${who}?`,
+        description:
+          'Orang ini dikeluarkan dari grup dan WhatsApp memberitahunya. ' +
+          'Untuk masuk lagi ia harus diundang ulang.',
+        confirmLabel: 'Keluarkan',
+        tone: 'danger',
+        icon: UserMinus,
+        onConfirm: () => void run('remove'),
+      });
+      return;
+    }
+    await run(action === 'promote' ? 'promote' : 'demote');
   }
 
   async function submitEdit(message: Message, text: string) {
@@ -657,6 +734,8 @@ export function MessageThread({
                     ownJids={ownJids}
                     resolveMention={resolveMention}
                     canRevokeAny={isGroupAdmin}
+                    canManageMembers={isGroupAdmin}
+                    senderMember={senderMember(message)}
                     // A reaction is a send like any other, so it is offered
                     // only while the account is actually connected.
                     onReact={

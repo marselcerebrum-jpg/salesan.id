@@ -102,6 +102,8 @@ export function MessageBubble({
   ownJids,
   resolveMention,
   canRevokeAny = false,
+  canManageMembers = false,
+  senderMember = null,
   onReact,
 }: {
   message: Message;
@@ -124,6 +126,9 @@ export function MessageBubble({
   resolveMention?: (jid: string) => string | null;
   /** True in a group this account administers: any message may be deleted. */
   canRevokeAny?: boolean;
+  /** Passed straight through; see MessageMenu for what each one governs. */
+  canManageMembers?: boolean;
+  senderMember?: { jid: string; isAdmin: boolean } | null;
   /** Adds or clears a reaction; an empty emoji means "take mine back". */
   onReact?: (message: Message, emoji: string) => void;
 }) {
@@ -220,6 +225,8 @@ export function MessageBubble({
             // place a private reply means anything.
             inGroup={showSender}
             canRevokeAny={canRevokeAny}
+            canManageMembers={canManageMembers}
+            senderMember={senderMember}
             onAction={(a) => onAction(message, a)}
           />
         ) : null}

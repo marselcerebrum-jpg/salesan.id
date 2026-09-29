@@ -8,8 +8,11 @@ import {
   MessageCircle,
   Pencil,
   Share2,
+  ShieldMinus,
+  ShieldPlus,
   Trash2,
   UserMinus,
+  UserX,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -25,7 +28,10 @@ export type MessageAction =
   | 'edit'
   | 'delete-everyone'
   | 'delete-me'
-  | 'copy';
+  | 'copy'
+  | 'promote'
+  | 'demote'
+  | 'kick';
 
 /**
  * The chevron on a bubble and the menu it opens.
@@ -39,6 +45,8 @@ export function MessageMenu({
   mine,
   inGroup = false,
   canRevokeAny = false,
+  canManageMembers = false,
+  senderMember = null,
   onAction,
 }: {
   message: Message;
@@ -55,6 +63,26 @@ export function MessageMenu({
    * read rather than a button that quietly does nothing.
    */
   canRevokeAny?: boolean;
+  /**
+   * True when this account may add and remove admins in this group.
+   *
+   * Separate from canRevokeAny although both come from the same fact today.
+   * Deleting somebody's message and removing them from the group are different
+   * powers, and a single flag standing for both would quietly grant the second
+   * the day the first is relaxed.
+   */
+  canManageMembers?: boolean;
+  /**
+   * The sender as the group itself addresses them, or null when they cannot be
+   * matched to a participant.
+   *
+   * Matched rather than taken from the message: WhatsApp addresses the same
+   * person by their number in one place and by a LID in another, and the JID
+   * that works here is the one the group's own participant list carries. When
+   * there is no match the actions are not offered at all — acting on a person
+   * we cannot positively identify is worse than not offering it.
+   */
+  senderMember?: { jid: string; isAdmin: boolean } | null;
   onAction: (action: MessageAction) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -106,6 +134,26 @@ export function MessageMenu({
   // same rule WhatsApp applies.
   if (!revoked && (mine || canRevokeAny)) {
     items.push({ action: 'delete-everyone', label: 'Hapus untuk semua', icon: Trash2, danger: true });
+  }
+
+  // Managing the person who sent it, rather than the message.
+  //
+  // Offered from the bubble because that is where the operator already is when
+  // somebody misbehaves: the alternative was opening the group panel and
+  // finding one name among several hundred. Not offered on our own messages —
+  // there is no removing yourself from a group this way — and not offered for a
+  // sender the participant list does not contain.
+  //
+  // Deliberately still offered on a deleted message: the message is gone, the
+  // person who sent it is the point, and that is exactly the case where an
+  // operator reaches for this.
+  if (inGroup && canManageMembers && !mine && senderMember) {
+    items.push(
+      senderMember.isAdmin
+        ? { action: 'demote', label: 'Turunkan dari admin', icon: ShieldMinus }
+        : { action: 'promote', label: 'Jadikan admin', icon: ShieldPlus },
+    );
+    items.push({ action: 'kick', label: 'Keluarkan dari grup', icon: UserX, danger: true });
   }
 
   const menuHeight = 12 + items.length * 38;
