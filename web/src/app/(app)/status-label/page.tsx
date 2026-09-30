@@ -60,7 +60,7 @@ type TabId = (typeof TABS)[number]['id'];
 const PANEL: Record<TabId, { title: string; hint: string }> = {
   harian: {
     title: 'Rekap Status Label Harian',
-    hint: 'Jumlah customer yang berpindah ke tiap status setiap hari.',
+    hint: 'Jumlah customer yang diberi tiap status pada hari itu.',
   },
   perpindahan: {
     title: 'Rekap Perpindahan Label',
