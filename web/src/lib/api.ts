@@ -1742,11 +1742,6 @@ export function groupMemberHistoryPath(chatJid: string, year: number, month: num
   );
 }
 
-/** The group history page's own route. */
-export function groupHistoryHref(chatJid: string) {
-  return `/groups/${encodeURIComponent(chatJid)}/riwayat`;
-}
-
 export interface GroupMemberHistory {
   days: GroupMemberDay[];
   /**
@@ -1757,11 +1752,6 @@ export interface GroupMemberHistory {
   first_day: string;
   year: number;
   month: number;
-}
-
-/** The detail page's own route, for linking a directory row to it. */
-export function groupDetailHref(chatJid: string) {
-  return `/groups/${encodeURIComponent(chatJid)}`;
 }
 
 /**

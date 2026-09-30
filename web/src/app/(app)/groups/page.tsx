@@ -11,18 +11,16 @@ import {
   Search,
   Smartphone,
 } from 'lucide-react';
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { FilterChips } from '@/components/contacts/FilterChips';
+import { GroupDrawer, type GroupTab } from '@/components/groups/GroupDrawer';
 import { EmptyState, ErrorNote, Spinner } from '@/components/ui/Primitives';
 import {
   exportGroups,
   fetchGroups,
   fetcher,
-  groupDetailHref,
-  groupHistoryHref,
   groupFacetsPath,
   groupsPath,
   type GroupQuery,
@@ -122,6 +120,39 @@ export default function GroupsPage() {
       return next;
     });
   }
+
+  /**
+   * Which group is open beside the table, and on which tab.
+   *
+   * Held here and mirrored into the address bar rather than routed. Routing
+   * would rebuild the directory underneath the drawer and lose the reader's
+   * place in nine hundred rows, which is the whole reason this is a drawer;
+   * mirroring costs nothing and keeps the view something you can send.
+   */
+  const [openJid, setOpenJid] = useState<string | null>(null);
+  const [tab, setTab] = useState<GroupTab>('anggota');
+
+  // Read once, from whatever link brought the reader here.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const jid = q.get('grup');
+    if (jid) setOpenJid(jid);
+    const t = q.get('tab');
+    if (t === 'anggota' || t === 'aktivitas') setTab(t);
+  }, []);
+
+  // Written back without navigating: replaceState leaves the page alone.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (openJid) {
+      url.searchParams.set('grup', openJid);
+      url.searchParams.set('tab', tab);
+    } else {
+      url.searchParams.delete('grup');
+      url.searchParams.delete('tab');
+    }
+    window.history.replaceState(null, '', url);
+  }, [openJid, tab]);
 
   const allOnPagePicked = groups.length > 0 && groups.every((g) => picked.has(g.chat_jid));
 
@@ -380,7 +411,6 @@ export default function GroupsPage() {
                   // A server that does not know about this field sends nothing,
                   // and "nothing" has to mean "no change", not "NaN".
                   const delta = Number.isFinite(group.delta_today) ? group.delta_today! : 0;
-                  const href = groupDetailHref(group.chat_jid);
                   return (
                     <tr
                       key={group.chat_jid}
@@ -404,12 +434,16 @@ export default function GroupsPage() {
                           {/* The name is the link, not only the arrow: it is
                               what the eye lands on, and a row whose only target
                               is a 28px chevron is a row that has to be aimed at. */}
-                          <Link
-                            href={href}
-                            className="font-medium text-ink underline-offset-2 hover:underline"
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenJid(group.chat_jid);
+                              setTab('anggota');
+                            }}
+                            className="text-left font-medium text-ink underline-offset-2 hover:underline"
                           >
                             {label}
-                          </Link>
+                          </button>
                           {delta !== 0 ? (
                             /* Only when something moved. A "+0" on nine hundred
                                rows is nine hundred pieces of furniture, and the
@@ -453,25 +487,33 @@ export default function GroupsPage() {
                              "how did it get to this" is about, so it is what
                              opens the answer, rather than a separate icon
                              nobody would connect to it. */
-                          <Link
-                            href={groupHistoryHref(group.chat_jid)}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenJid(group.chat_jid);
+                              setTab('aktivitas');
+                            }}
                             aria-label={`Riwayat anggota ${label} per hari`}
                             className="rounded px-1 underline decoration-dotted underline-offset-4 transition-colors hover:text-ink"
                           >
                             {group.member_count.toLocaleString('id-ID')}
-                          </Link>
+                          </button>
                         ) : (
                           '–'
                         )}
                       </Td>
                       <Td>
-                        <Link
-                          href={href}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenJid(group.chat_jid);
+                            setTab('anggota');
+                          }}
                           aria-label={`Lihat anggota ${label}`}
                           className="inline-flex rounded-lg p-1.5 text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-soft"
                         >
                           <ChevronRight className="size-4" />
-                        </Link>
+                        </button>
                       </Td>
                     </tr>
                   );
@@ -502,6 +544,12 @@ export default function GroupsPage() {
         ) : null}
       </div>
 
+      <GroupDrawer
+        chatJid={openJid}
+        tab={tab}
+        onTab={setTab}
+        onClose={() => setOpenJid(null)}
+      />
     </div>
   );
 }
