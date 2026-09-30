@@ -21,7 +21,7 @@ import { DAILY_GROUPS, type DailyColumn } from '@/components/analytics/dailyColu
 import type { DrilldownKind } from '@/components/analytics/DrilldownPanel';
 import { InfoTip, RowSkeleton } from '@/components/analytics/Primitives';
 import type { LabelCategorySummary } from '@/lib/api';
-import type { LabelUsage, PerformanceDay } from '@/lib/types';
+import type { PerformanceDay } from '@/lib/types';
 
 /**
  * The three tiles on the Status Label card.
@@ -84,6 +84,14 @@ interface CardSpec {
   /** The label on the button that opens the drilldown. */
   drillLabel?: string;
   /**
+   * Where the card leads, when it leads somewhere instead of opening a panel.
+   *
+   * Set, the heading and the footer become links and no drilldown is offered:
+   * a card that both navigates and opens a panel gives two answers to one
+   * press, and the reader has to discover which is which.
+   */
+  drillHref?: string;
+  /**
    * A shorter name for this card only.
    *
    * "Pesan Masuk Grup" is the right label in a table where it sits beside the
@@ -138,11 +146,15 @@ const CARDS: CardSpec[] = [
     keys: [],
     icon: Tag,
     tone: 'iris',
-    href: '/contacts',
+    // Not a panel. The panel listed every WhatsApp label by its raw name —
+    // "Hot → FU HOT", "Selasa → Rabu" — which is the vocabulary of whoever was
+    // holding the phone, not a reading of the book. Cold, Warm and Hot live on
+    // their own page, and the variants belong there, behind the drill-down.
+    href: '/status-label',
+    drillHref: '/status-label',
     span: 'lg:col-span-6',
     variant: 'list',
-    drill: { kind: 'label-events' },
-    drillLabel: 'Lihat perpindahan label',
+    drillLabel: 'Lihat detail status label',
   },
   {
     group: 'broadcast',
@@ -193,7 +205,6 @@ export function GroupRecap({
   summary,
   previous,
   loading,
-  labelUsage = [],
   labelCategories,
   onDrill,
   columnDrills,
@@ -203,15 +214,6 @@ export function GroupRecap({
   /** The same figures over the period before this one. Undefined until loaded. */
   previous: PerformanceDay | undefined;
   loading: boolean;
-  /**
-   * The workspace's own labels with how many contacts carry each.
-   *
-   * Passed in rather than fetched here because the page already asks for it,
-   * and the Status Label card is the one place where "label dan jumlahnya"
-   * means the operator's actual vocabulary — Cold, Warm, Closing — not the
-   * names of our metrics.
-   */
-  labelUsage?: LabelUsage[];
   /**
    * Cold, Warm and Hot, when the caller has them.
    *
@@ -267,6 +269,7 @@ export function GroupRecap({
           : group.columns;
         const Icon = card.icon;
         const drill = card.drill && onDrill ? () => onDrill(card.drill!) : undefined;
+        const leadsTo = card.drillHref;
 
         return (
           <section
@@ -287,7 +290,14 @@ export function GroupRecap({
               </span>
               {/* The heading is the control where there is something to open,
                   because "click the card" is what somebody tries first. */}
-              {drill ? (
+              {leadsTo ? (
+                <Link
+                  href={leadsTo}
+                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-ink hover:text-brand-700"
+                >
+                  {group.label}
+                </Link>
+              ) : drill ? (
                 <button
                   type="button"
                   onClick={drill}
@@ -345,28 +355,6 @@ export function GroupRecap({
                       </Link>
                     ))}
                   </div>
-                ) : card.group === 'label' && labelUsage.length > 0 ? (
-                  <ul className="border-t border-hairline">
-                    {labelUsage.slice(0, 8).map((u) => (
-                      <li
-                        key={u.label_id ?? u.name}
-                        title={`${u.assigned} dipasang, ${u.removed} dilepas pada periode ini`}
-                        className="flex items-center gap-2.5 border-b border-hairline px-4 py-1.5 last:border-b-0"
-                      >
-                        <span
-                          aria-hidden
-                          className="size-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: u.color }}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-xs text-ink-soft">
-                          {u.name}
-                        </span>
-                        <span className="nums shrink-0 text-sm font-semibold text-ink">
-                          {u.active_contacts.toLocaleString('id-ID')}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
                 ) : null}
 
                 <ul className="flex-1 border-t border-hairline">
@@ -382,7 +370,14 @@ export function GroupRecap({
                   ))}
                 </ul>
 
-                {card.drillLabel && drill ? (
+                {card.drillLabel && leadsTo ? (
+                  <Link
+                    href={leadsTo}
+                    className="border-t border-hairline px-4 py-2 text-left text-xs font-medium text-brand-700 transition-colors hover:bg-surface-sunken"
+                  >
+                    {card.drillLabel} →
+                  </Link>
+                ) : card.drillLabel && drill ? (
                   <button
                     type="button"
                     onClick={drill}

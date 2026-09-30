@@ -14,7 +14,6 @@ import { QueueCard } from '@/components/analytics/QueueCard';
 import { ErrorState } from '@/components/analytics/Primitives';
 import { TrafficChart } from '@/components/analytics/TrafficChart';
 import {
-  analyticsPath,
   fetcher,
   labelCategoryPath,
   performancePath,
@@ -22,7 +21,7 @@ import {
   type LabelCategoryResponse,
 } from '@/lib/api';
 import { useRealtimeEvent } from '@/lib/realtime';
-import type { AnalyticsScope, LabelTransition, LabelUsage, PerformanceReport } from '@/lib/types';
+import type { AnalyticsScope, PerformanceReport } from '@/lib/types';
 
 /**
  * The figures behind one scope: a person, a team, or everything visible.
@@ -112,17 +111,6 @@ export function PerformanceSummary({
     scope: AnalyticsScope;
   }>(path, fetcher, { refreshInterval: 120_000, keepPreviousData: true });
 
-  // The label card needs the per-label breakdown, which lives on the same
-  // endpoint as the label drill-down, so the two share one definition.
-  // `events=false` skips the expensive half.
-  const labels = useSWR<{
-    usage: LabelUsage[];
-    transitions: LabelTransition[];
-    /** Changes this filter is hiding because nobody can be named for them. */
-    unattributed: number;
-  }>(analyticsPath('label-events', query, { events: 'false' }), fetcher, {
-    keepPreviousData: true,
-  });
 
   // Cold, Warm and Hot: each customer counted once, under the temperature of
   // the label most recently put on them. A state rather than an event, so it
@@ -144,7 +132,7 @@ export function PerformanceSummary({
 
   useRealtimeEvent('metrics.updated', () => {
     void mutate();
-    void labels.mutate();
+    void labelCategories.mutate();
   });
   useRealtimeEvent('campaign.updated', () => void mutate());
   useRealtimeEvent('schedule.updated', () => void mutate());
@@ -229,7 +217,6 @@ export function PerformanceSummary({
           summary={s}
           previous={previous}
           loading={loading}
-          labelUsage={labels.data?.usage ?? []}
           labelCategories={labelCategories.data?.summary}
           onDrill={onDrill}
           columnDrills={COLUMN_DRILLS}

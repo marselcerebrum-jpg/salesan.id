@@ -25,7 +25,6 @@ import { TrafficChart } from '@/components/analytics/TrafficChart';
 import { ErrorState, InfoTip, PageShell } from '@/components/analytics/Primitives';
 import {
   analyticsFiltersPathFor,
-  analyticsPath,
   dashboardPath,
   fetcher,
   type DashboardStats,
@@ -33,7 +32,7 @@ import {
   type LabelCategoryResponse,
 } from '@/lib/api';
 import { todayWIB, useAnalyticsFilter } from '@/lib/useAnalyticsFilter';
-import type { DashboardSummary, FilterOptions, LabelUsage } from '@/lib/types';
+import type { DashboardSummary, FilterOptions } from '@/lib/types';
 
 /**
  * Dashboard — the whole operation on one screen.
@@ -103,25 +102,11 @@ function Dashboard() {
   );
 
   /*
-   * The workspace's own labels, with how many contacts carry each.
+   * Cold, Warm and Hot: each customer counted once.
    *
-   * Same endpoint the Status Label card on Performa reads, asked without its
-   * event list: `events=false` skips the expensive half, so the Dashboard gets
-   * the breakdown without paying for a history nobody opened yet.
-   */
-  const labels = useSWR<{ usage: LabelUsage[] }>(
-    analyticsPath('label-events', query, { events: 'false' }),
-    fetcher,
-    { keepPreviousData: true },
-  );
-
-  /*
-   * Cold, Warm and Hot: the same customers as above, counted once each.
-   *
-   * A separate call because it answers a different question. The usage figures
-   * are per label and a customer appears under every label they carry; these
-   * three put each customer in exactly one place, which is what makes them
-   * addable and what makes the card readable.
+   * This replaced a per-label breakdown where a customer appeared under every
+   * label they carried. Those figures could not be added up and the card could
+   * not be read; these three put each customer in exactly one place.
    *
    * Not filtered by the period, deliberately — these are a state, not an event,
    * and the card says so.
@@ -322,7 +307,6 @@ function Dashboard() {
           summary={s}
           previous={prior.data?.summary}
           loading={report.isLoading}
-          labelUsage={labels.data?.usage ?? []}
           labelCategories={labelCategories.data?.summary}
           onDrill={setDrill}
         />
