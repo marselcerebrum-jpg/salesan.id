@@ -478,6 +478,12 @@ func (s *Session) buildMessageInput(
 	forcedStatus string,
 ) (repository.InsertMessageInput, bool) {
 	body := extractContent(evt.Message)
+	if body.Kind != "" {
+		// One line per message we cannot read. They are five percent of the
+		// traffic and nobody knew what they were.
+		s.log.Info("message type not understood",
+			"kind", body.Kind, "chat", evt.Info.Chat.String(), "from_me", evt.Info.IsFromMe)
+	}
 	if body.Skip {
 		return repository.InsertMessageInput{}, false
 	}

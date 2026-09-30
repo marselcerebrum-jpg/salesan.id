@@ -2,10 +2,12 @@ package wa
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/salesan/omnichannel/backend/internal/models"
 )
@@ -24,6 +26,13 @@ type content struct {
 	// Skip is true for payloads that carry no user-visible content (protocol
 	// messages, revokes, key distribution) and must not become inbox rows.
 	Skip bool
+	// Kind names what a message we could not read actually carried.
+	//
+	// Empty for everything we understand. "Unsupported" was a bucket with no
+	// lid: the inbox printed "[pesan tidak didukung]" and nothing anywhere
+	// recorded what had been in it, so the only way to find out what operators
+	// were failing to see was to ask them. This names it in the log instead.
+	Kind string
 }
 
 // contextInfoOf digs out the ContextInfo whichever kind of message carries it.
@@ -239,7 +248,36 @@ func extractContent(msg *waE2E.Message) content {
 		return content{Skip: true}
 	}
 
-	return content{Type: "unsupported", Body: strPtr("[pesan tidak didukung]")}
+	return content{
+		Type: "unsupported",
+		Body: strPtr("[pesan tidak didukung]"),
+		Kind: messageKind(msg),
+	}
+}
+
+// messageKind lists the fields a message carries, most useful first.
+//
+// Read from the protobuf itself rather than from a list kept by hand, because a
+// list kept by hand is exactly what was missing: WhatsApp adds message types
+// without asking, and the ones we cannot read are by definition the ones nobody
+// wrote down. Only reached on the unsupported path, so it costs nothing for the
+// messages that do work.
+func messageKind(msg *waE2E.Message) string {
+	if msg == nil {
+		return "(kosong)"
+	}
+	var names []string
+	msg.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+		names = append(names, string(fd.Name()))
+		// Three is enough to recognise it; a message carrying context info and
+		// a device key alongside its payload should not fill a log line.
+		return len(names) < 3
+	})
+	if len(names) == 0 {
+		return "(tanpa isi)"
+	}
+	sort.Strings(names)
+	return strings.Join(names, "+")
 }
 
 // phoneFromJID returns the bare phone number for a real user JID, or "" for

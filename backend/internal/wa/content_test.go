@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"strings"
 	"testing"
 
 	"go.mau.fi/whatsmeow/proto/waCommon"
@@ -274,5 +275,34 @@ func TestStrPtr(t *testing.T) {
 	}
 	if got := strPtr("x"); got == nil || *got != "x" {
 		t.Error("non-empty string should round-trip")
+	}
+}
+
+// The unsupported bucket has to name what went into it. Without that, a message
+// type WhatsApp adds tomorrow becomes "[pesan tidak didukung]" on screen and
+// leaves no trace anywhere of what it was.
+func TestUnsupportedMessageNamesWhatItCarried(t *testing.T) {
+	msg := &waE2E.Message{
+		PtvMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/mp4")},
+	}
+	got := extractContent(msg)
+	if got.Type != "unsupported" {
+		t.Fatalf("type = %q, want unsupported", got.Type)
+	}
+	if !strings.Contains(got.Kind, "ptvMessage") {
+		t.Errorf("kind = %q, want it to name ptvMessage", got.Kind)
+	}
+}
+
+// Everything we do understand stays silent: a kind on a message that rendered
+// fine would put a line in the log for every photo anyone sends.
+func TestUnderstoodMessagesCarryNoKind(t *testing.T) {
+	for name, msg := range map[string]*waE2E.Message{
+		"teks":   {Conversation: proto.String("halo")},
+		"gambar": {ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}},
+	} {
+		if got := extractContent(msg); got.Kind != "" {
+			t.Errorf("%s: kind = %q, want empty", name, got.Kind)
+		}
 	}
 }
