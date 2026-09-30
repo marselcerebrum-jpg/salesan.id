@@ -12,6 +12,8 @@ import type {
   LabelCategory,
   LabelCategoryApplication,
   LabelCategoryContact,
+  LabelCategoryDay,
+  LabelCategorySummary,
   LabelCategoryTransition,
 } from '@/lib/api';
 
@@ -315,11 +317,22 @@ export function CustomerJourney({
             {newestFirst.map((h, i) => (
               <tr key={`${h.at}-${i}`} className="border-b border-hairline last:border-0">
                 <td className="px-4 py-2.5 text-ink-soft">
-                  {new Date(h.at).toLocaleString('id-ID', {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                    timeZone: 'Asia/Jakarta',
-                  })}
+                  {/* A rail down the left, so a journey reads as one line of
+                      travel rather than as a stack of unrelated rows. */}
+                  <span className="flex items-center gap-2.5">
+                    <span
+                      aria-hidden
+                      className={clsx(
+                        'size-2 shrink-0 rounded-full',
+                        h.category ? RAIL[h.category] : 'bg-ink-muted/40',
+                      )}
+                    />
+                    {new Date(h.at).toLocaleString('id-ID', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                      timeZone: 'Asia/Jakarta',
+                    })}
+                  </span>
                 </td>
                 <td className="px-4 py-2.5">
                   <LabelChip
@@ -367,6 +380,13 @@ export function CustomerJourney({
 /* --- rekap perpindahan --------------------------------------------------------- */
 
 /** Every direction a customer can move, in journey order. */
+/** The dot on the rail, one colour per category. */
+const RAIL: Record<LabelCategory, string> = {
+  cold: 'bg-info',
+  warm: 'bg-warn',
+  hot: 'bg-danger',
+};
+
 const MOVES: { from: LabelCategory; to: LabelCategory }[] = [];
 for (const a of CATEGORIES) {
   for (const b of CATEGORIES) {
@@ -461,5 +481,126 @@ export function TransitionRecap({ rows }: { rows: LabelCategoryTransition[] }) {
         </table>
       )}
     </section>
+  );
+}
+
+/* --- rekap harian -------------------------------------------------------------- */
+
+/**
+ * How many customers moved into each category, day by day.
+ *
+ * A flow, and the heading says so. The three numbers at the top of the page are
+ * a stock — how many customers stand in each category now — and putting the two
+ * in one table without a word would invite them to be read as the same thing on
+ * different days.
+ */
+export function DailyRecap({ rows }: { rows: LabelCategoryDay[] }) {
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (a, r) => ({ cold: a.cold + r.cold, warm: a.warm + r.warm, hot: a.hot + r.hot }),
+        { cold: 0, warm: 0, hot: 0 },
+      ),
+    [rows],
+  );
+
+  if (rows.length === 0) {
+    return (
+      <div className="p-6">
+        <EmptyState
+          title="Belum ada perubahan label pada periode ini"
+          description="Riwayat label mulai dicatat 22 September 2026. Sebelum tanggal itu memang tidak pernah tersimpan."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="border-b border-hairline text-2xs text-ink-muted uppercase">
+          <th className="px-4 py-2.5 text-left font-semibold">Tanggal</th>
+          {CATEGORIES.map((c) => (
+            <th key={c.id} className={clsx('px-4 py-2.5 text-right font-semibold', c.tone)}>
+              {c.label}
+            </th>
+          ))}
+          <th className="px-4 py-2.5 text-right font-semibold">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {[...rows].reverse().map((r) => (
+          <tr key={r.day} className="border-b border-hairline">
+            <td className="px-4 py-2 text-ink-soft">{r.day}</td>
+            {CATEGORIES.map((c) => (
+              <td key={c.id} className="nums px-4 py-2 text-right text-ink">
+                {r[c.id] || <span className="text-ink-muted">0</span>}
+              </td>
+            ))}
+            <td className="nums px-4 py-2 text-right text-ink-soft">
+              {r.cold + r.warm + r.hot}
+            </td>
+          </tr>
+        ))}
+        <tr className="bg-surface-sunken/50">
+          <td className="px-4 py-2 text-sm font-medium text-ink">Total</td>
+          {CATEGORIES.map((c) => (
+            <td key={c.id} className="nums px-4 py-2 text-right font-semibold text-ink">
+              {totals[c.id]}
+            </td>
+          ))}
+          <td className="nums px-4 py-2 text-right font-semibold text-ink">
+            {totals.cold + totals.warm + totals.hot}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+/* --- status saat ini ----------------------------------------------------------- */
+
+/** The three totals as they stand, each a way into its own drill-down. */
+export function CurrentState({
+  summary,
+  active,
+  onPick,
+}: {
+  summary: LabelCategorySummary | undefined;
+  active: LabelCategory;
+  onPick: (c: LabelCategory) => void;
+}) {
+  return (
+    <div className="grid gap-3 p-4 sm:grid-cols-3">
+      {CATEGORIES.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          onClick={() => onPick(c.id)}
+          aria-pressed={active === c.id}
+          className={clsx(
+            'flex items-center gap-3 rounded-card border p-4 text-left transition-colors',
+            c.banner,
+            active === c.id ? 'ring-2 ring-brand-700 ring-offset-2 ring-offset-surface-raised' : '',
+          )}
+        >
+          <span
+            className={clsx(
+              'grid size-10 shrink-0 place-items-center rounded-control bg-surface-raised',
+              c.tone,
+            )}
+          >
+            <c.icon className="size-5" aria-hidden />
+          </span>
+          <span className="min-w-0">
+            <span className={clsx('block text-sm font-medium', c.tone)}>{c.label}</span>
+            <span className="nums block text-2xl font-semibold text-ink">
+              {summary ? summary[c.id].toLocaleString('id-ID') : '–'}
+            </span>
+            <span className="block text-xs text-ink-muted">Customer</span>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }

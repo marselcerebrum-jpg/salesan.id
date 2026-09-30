@@ -300,6 +300,55 @@ func (r *Repo) LabelCategoryTransitions(
 	return out, rows.Err()
 }
 
+// LabelCategoryDaily counts, for each day, how many customers were given a
+// label of each category.
+//
+// A flow, not a stock. The three figures on the card answer "how many customers
+// are Hot"; this answers "how many became Hot on Tuesday", and the two are
+// different questions with different uses — one is the size of the book, the
+// other is the work that moved it.
+//
+// Distinct contacts rather than events: somebody tagged "FU HOT" and then
+// "Pindahan Hot" in one afternoon moved once, and counting them twice would
+// make a busy day of housekeeping look like a busy day of selling.
+func (r *Repo) LabelCategoryDaily(
+	ctx context.Context, sc Scope, f models.AnalyticsFilter,
+) ([]models.LabelCategoryDay, error) {
+	q := &queryArgs{}
+	where := scopeWhere("le", sc, f, "occurred_at", q)
+
+	sql := `
+		select to_char((le.occurred_at ` + jakartaDate + `, 'YYYY-MM-DD') as hari,
+		       count(distinct le.contact_id) filter (
+		         where public.label_category_of(le.to_label_name) = 'cold') as cold,
+		       count(distinct le.contact_id) filter (
+		         where public.label_category_of(le.to_label_name) = 'warm') as warm,
+		       count(distinct le.contact_id) filter (
+		         where public.label_category_of(le.to_label_name) = 'hot')  as hot
+		  from public.contact_label_events le` + where + `
+		   and le.event_type = 'label_assigned'
+		   and le.contact_id is not null
+		   and public.label_category_of(le.to_label_name) is not null
+		 group by hari
+		 order by hari asc`
+
+	rows, err := r.pool.Query(ctx, sql, q.args...)
+	if err != nil {
+		return nil, fmt.Errorf("label category daily: %w", err)
+	}
+	defer rows.Close()
+
+	out := []models.LabelCategoryDay{}
+	for rows.Next() {
+		var d models.LabelCategoryDay
+		if err := rows.Scan(&d.Day, &d.Cold, &d.Warm, &d.Hot); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func validLabelCategory(c string) bool {
 	switch c {
 	case "cold", "warm", "hot":

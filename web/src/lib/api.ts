@@ -2068,10 +2068,24 @@ export interface LabelCategoryTransition {
   contacts: number;
 }
 
+/**
+ * One day's movement into each category.
+ *
+ * A flow, not a stock: how many customers became Cold, Warm or Hot that day,
+ * counted once each however many times they were retagged.
+ */
+export interface LabelCategoryDay {
+  day: string;
+  cold: number;
+  warm: number;
+  hot: number;
+}
+
 export interface LabelCategoryResponse {
   summary: LabelCategorySummary;
   applications?: LabelCategoryApplication[];
   transitions?: LabelCategoryTransition[];
+  daily?: LabelCategoryDay[];
   category?: LabelCategory;
 }
 
@@ -2109,7 +2123,11 @@ export function contactLabelHistoryPath(contactId: string) {
 /** Downloads the report. `scope` picks the shape: movement, or one row per customer. */
 export async function exportLabelCategory(
   query: AnalyticsQuery,
-  params: { scope: 'summary' | 'detail'; format: 'csv' | 'xlsx'; category?: LabelCategory },
+  params: {
+    scope: 'daily' | 'summary' | 'detail';
+    format: 'csv' | 'xlsx';
+    category?: LabelCategory;
+  },
 ) {
   const more: Record<string, string> = { scope: params.scope, format: params.format };
   if (params.category) more.category = params.category;

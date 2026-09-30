@@ -60,6 +60,9 @@ func (s *Server) handleLabelCategorySummary(w http.ResponseWriter, r *http.Reque
 		body["category"] = category
 	}
 
+	// The card asks for the three totals and nothing else; the detail page wants
+	// the tables too. One flag rather than two endpoints, so the numbers on both
+	// screens come from one definition.
 	if r.URL.Query().Get("transitions") != "false" {
 		moves, err := s.repo.LabelCategoryTransitions(r.Context(), sc, f)
 		if err != nil {
@@ -67,6 +70,13 @@ func (s *Server) handleLabelCategorySummary(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		body["transitions"] = moves
+
+		daily, err := s.repo.LabelCategoryDaily(r.Context(), sc, f)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		body["daily"] = daily
 	}
 
 	writeJSON(w, http.StatusOK, body)
@@ -142,7 +152,9 @@ func (s *Server) handleExportLabelCategory(w http.ResponseWriter, r *http.Reques
 	}
 
 	shape := r.URL.Query().Get("scope")
-	if shape != "detail" {
+	switch shape {
+	case "detail", "daily":
+	default:
 		shape = "summary"
 	}
 	stamp := time.Now().Format("2006-01-02")
@@ -150,7 +162,20 @@ func (s *Server) handleExportLabelCategory(w http.ResponseWriter, r *http.Reques
 	var header []string
 	var rows [][]string
 
-	if shape == "summary" {
+	if shape == "daily" {
+		days, err := s.repo.LabelCategoryDaily(r.Context(), sc, f)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		header = []string{"tanggal", "cold", "warm", "hot", "total"}
+		for _, d := range days {
+			rows = append(rows, []string{
+				d.Day, strconv.Itoa(d.Cold), strconv.Itoa(d.Warm), strconv.Itoa(d.Hot),
+				strconv.Itoa(d.Cold + d.Warm + d.Hot),
+			})
+		}
+	} else if shape == "summary" {
 		moves, err := s.repo.LabelCategoryTransitions(r.Context(), sc, f)
 		if err != nil {
 			writeAppError(w, err)

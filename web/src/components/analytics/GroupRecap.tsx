@@ -5,11 +5,8 @@ import {
   ChevronRight,
   CircleDashed,
   Clock,
-  Flame,
   MessageCircle,
   Radio,
-  Snowflake,
-  Sun,
   Tag,
   Ticket,
   Users,
@@ -20,6 +17,7 @@ import Link from 'next/link';
 import { DAILY_GROUPS, type DailyColumn } from '@/components/analytics/dailyColumns';
 import type { DrilldownKind } from '@/components/analytics/DrilldownPanel';
 import { InfoTip, RowSkeleton } from '@/components/analytics/Primitives';
+import { CATEGORIES } from '@/components/statuslabel/parts';
 import type { LabelCategorySummary } from '@/lib/api';
 import type { PerformanceDay } from '@/lib/types';
 
@@ -29,16 +27,7 @@ import type { PerformanceDay } from '@/lib/types';
  * Kept beside the card rather than imported from the detail page: this is the
  * shape of a summary, and the page below it owns the shape of a drill-down.
  */
-const LABEL_CATEGORIES: {
-  id: keyof LabelCategorySummary;
-  label: string;
-  icon: LucideIcon;
-  tone: string;
-}[] = [
-  { id: 'cold', label: 'Cold', icon: Snowflake, tone: 'text-info' },
-  { id: 'warm', label: 'Warm', icon: Sun, tone: 'text-warn' },
-  { id: 'hot', label: 'Hot', icon: Flame, tone: 'text-danger' },
-];
+const LABEL_CATEGORIES = CATEGORIES;
 
 /**
  * The period's recap, group by group, over every application at once.
@@ -337,21 +326,37 @@ export function GroupRecap({
                     called Status Label, "label" means Cold and Closing, not the
                     names of our counters. The counters follow underneath. */}
                 {card.group === 'label' && labelCategories ? (
-                  <div className="grid grid-cols-3 gap-px border-t border-hairline bg-hairline">
+                  <div className="grid grid-cols-3 gap-2 border-t border-hairline p-3">
                     {LABEL_CATEGORIES.map((c) => (
                       <Link
                         key={c.id}
                         href={`/status-label?kategori=${c.id}`}
-                        className="flex flex-col gap-0.5 bg-surface-raised px-3 py-2.5 transition-colors hover:bg-surface-sunken/60"
+                        className={clsx(
+                          'group/tile flex items-start gap-2 rounded-control border p-2.5 transition-colors',
+                          c.banner,
+                        )}
                       >
-                        <span className="flex items-center gap-1.5">
-                          <c.icon className={clsx('size-3.5', c.tone)} aria-hidden />
-                          <span className="text-xs text-ink-soft">{c.label}</span>
+                        <span
+                          className={clsx(
+                            'grid size-7 shrink-0 place-items-center rounded-control bg-surface-raised',
+                            c.tone,
+                          )}
+                        >
+                          <c.icon className="size-3.5" aria-hidden />
                         </span>
-                        <span className="nums text-lg font-semibold text-ink">
-                          {labelCategories[c.id].toLocaleString('id-ID')}
+                        <span className="min-w-0 flex-1">
+                          <span className={clsx('block text-xs font-medium', c.tone)}>
+                            {c.label}
+                          </span>
+                          <span className="nums block text-xl font-semibold text-ink">
+                            {labelCategories[c.id].toLocaleString('id-ID')}
+                          </span>
+                          <span className="block text-2xs text-ink-muted">Customer</span>
                         </span>
-                        <span className="text-2xs text-ink-muted">Customer</span>
+                        <ChevronRight
+                          className="mt-0.5 size-3.5 shrink-0 text-ink-muted transition-transform group-hover/tile:translate-x-0.5"
+                          aria-hidden
+                        />
                       </Link>
                     ))}
                   </div>

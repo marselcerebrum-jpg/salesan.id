@@ -927,3 +927,15 @@ type LabelCategoryTransition struct {
 	Count    int    `json:"count"`
 	Contacts int    `json:"contacts"`
 }
+
+// LabelCategoryDay is one day's movement into each category.
+//
+// A flow rather than a stock: how many customers became Cold, Warm or Hot on
+// that day, not how many stood there at the end of it. Distinct customers, so a
+// person retagged twice in an afternoon counts once.
+type LabelCategoryDay struct {
+	Day  string `json:"day"`
+	Cold int    `json:"cold"`
+	Warm int    `json:"warm"`
+	Hot  int    `json:"hot"`
+}

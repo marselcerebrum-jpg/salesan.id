@@ -1,17 +1,20 @@
 'use client';
 
-import { ArrowLeft, ChevronRight, Download, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { PeriodMenu } from '@/components/analytics/PeriodMenu';
 import { FilterBar, type StatusLabelFilter } from '@/components/statuslabel/FilterBar';
+import { DownloadMenu, type ReportScope } from '@/components/statuslabel/DownloadMenu';
 import { CategoryBanner, CategoryPills, categoryOf } from '@/components/statuslabel/parts';
 import {
   ApplicationTable,
   ContactTable,
+  CurrentState,
   CustomerJourney,
+  DailyRecap,
   TransitionRecap,
 } from '@/components/statuslabel/Tables';
 import { ErrorNote } from '@/components/ui/Primitives';
@@ -33,6 +36,47 @@ import type { FilterOptions } from '@/lib/types';
 const PAGE = 25;
 
 /**
+ * The four ways of reading one category.
+ *
+ * Daily first because it is the question a manager opens this page with — what
+ * happened this week — and the current state last but one because it is the
+ * figure already sitting at the top of the page in the banner.
+ */
+const TABS = [
+  { id: 'harian', label: 'Rekap Harian' },
+  { id: 'perpindahan', label: 'Rekap Perpindahan' },
+  { id: 'sekarang', label: 'Status Saat Ini' },
+  { id: 'aplikasi', label: 'Detail Per Aplikasi' },
+] as const;
+
+type TabId = (typeof TABS)[number]['id'];
+
+/**
+ * What each tab holds, in words.
+ *
+ * Stock and flow sit next to each other here and read alike unless one of them
+ * says which it is. The subtitles are where that is said.
+ */
+const PANEL: Record<TabId, { title: string; hint: string }> = {
+  harian: {
+    title: 'Rekap Status Label Harian',
+    hint: 'Jumlah customer yang berpindah ke tiap status setiap hari.',
+  },
+  perpindahan: {
+    title: 'Rekap Perpindahan Label',
+    hint: 'Jumlah perubahan label antar status setiap hari.',
+  },
+  sekarang: {
+    title: 'Status Saat Ini',
+    hint: 'Jumlah customer berdasarkan label terakhir yang dipasang padanya.',
+  },
+  aplikasi: {
+    title: 'Distribusi Customer per Aplikasi',
+    hint: 'Jumlah customer pada status yang dipilih, dipecah per aplikasi.',
+  },
+};
+
+/**
  * Status Label, four depths on one route.
  *
  * Which category, which brand, which customer, what happened to them: one
@@ -48,6 +92,7 @@ export default function StatusLabelPage() {
   const [category, setCategory] = useState<LabelCategory>('hot');
   const [filter, setFilter] = useState<StatusLabelFilter>({ applicationId: '', accountId: '' });
   const [contactId, setContactId] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabId>('harian');
   const [period, setPeriod] = useState<AnalyticsQuery>({});
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -61,6 +106,8 @@ export default function StatusLabelPage() {
     if (c === 'cold' || c === 'warm' || c === 'hot') setCategory(c);
     setFilter({ applicationId: q.get('app') ?? '', accountId: q.get('nomor') ?? '' });
     setContactId(q.get('kontak'));
+    const t = q.get('tab');
+    if (TABS.some((x) => x.id === t)) setTab(t as TabId);
   }, []);
 
   // Mirrored back without navigating: replaceState leaves the page alone.
@@ -71,12 +118,13 @@ export default function StatusLabelPage() {
       ['app', filter.applicationId],
       ['nomor', filter.accountId],
       ['kontak', contactId ?? ''],
+      ['tab', tab],
     ] as const) {
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
     window.history.replaceState(null, '', url);
-  }, [category, filter, contactId]);
+  }, [category, filter, contactId, tab]);
 
   const options = useSWR<FilterOptions>(analyticsFiltersPathFor(), fetcher);
 
@@ -98,6 +146,7 @@ export default function StatusLabelPage() {
   const summary = data?.summary;
   const apps = useMemo(() => data?.applications ?? [], [data]);
   const transitions = useMemo(() => data?.transitions ?? [], [data]);
+  const daily = useMemo(() => data?.daily ?? [], [data]);
 
   // Which brand the reader has drilled into. Held apart from the filter above:
   // the filter narrows what is counted, this picks one row to open.
@@ -126,7 +175,7 @@ export default function StatusLabelPage() {
     [contacts.data, contactId],
   );
 
-  async function download(scope: 'summary' | 'detail', format: 'csv' | 'xlsx') {
+  async function download(scope: ReportScope, format: 'csv' | 'xlsx') {
     setBusy(`${scope}-${format}`);
     setFailure(null);
     try {
@@ -217,20 +266,7 @@ export default function StatusLabelPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <PeriodMenu value={period} onChange={setPeriod} />
-          <Action
-            icon={Download}
-            busy={busy === 'summary-csv'}
-            onClick={() => void download('summary', 'csv')}
-          >
-            Rekap CSV
-          </Action>
-          <Action
-            icon={FileSpreadsheet}
-            busy={busy === 'detail-xlsx'}
-            onClick={() => void download('detail', 'xlsx')}
-          >
-            Detail XLSX
-          </Action>
+          <DownloadMenu busy={busy} onPick={(scope, format) => void download(scope, format)} />
         </div>
       </header>
 
@@ -327,31 +363,66 @@ export default function StatusLabelPage() {
           </div>
           {/*
             Said plainly because the period picker sits right above it, and the
-            habit of a filtered dashboard is to assume everything obeys it.
-            These are a count of how things stand, not of what happened in a
-            month: a customer tagged Hot in June is still Hot today.
+            habit of a filtered dashboard is to assume everything obeys it. The
+            banner is a count of how things stand; the tabs below are what
+            happened.
           */}
           <p className="mt-2 text-2xs text-ink-muted">
-            Angka kategori adalah kondisi sekarang dan tidak mengikuti periode. Rekap perpindahan di
-            bawah yang mengikuti periode.
+            Angka di atas adalah kondisi sekarang dan tidak mengikuti periode. Rekap harian dan
+            rekap perpindahan mengikuti periode.
           </p>
 
-          <div className="mt-4">
-            <ApplicationTable
-              loading={isLoading}
-              rows={apps}
-              total={summary?.[category] ?? 0}
-              onPick={(id) => {
-                setOpenApp(id);
-                setPage(0);
-                setSearch('');
-              }}
-            />
-          </div>
+          <section className="mt-4 rounded-card border border-hairline bg-surface-raised">
+            <div className="flex flex-wrap items-center gap-1 border-b border-hairline px-3">
+              {TABS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  aria-current={tab === t.id ? 'page' : undefined}
+                  className={
+                    tab === t.id
+                      ? 'relative px-3 py-2.5 text-sm font-medium text-ink after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-brand-700'
+                      : 'px-3 py-2.5 text-sm font-medium text-ink-muted transition-colors hover:text-ink-soft'
+                  }
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-          <div className="mt-4">
-            <TransitionRecap rows={transitions} />
-          </div>
+            <div className="border-b border-hairline px-4 py-3">
+              <h2 className="text-sm font-medium text-ink">{PANEL[tab].title}</h2>
+              <p className="mt-0.5 text-xs text-ink-muted">{PANEL[tab].hint}</p>
+            </div>
+
+            {tab === 'harian' ? (
+              <DailyRecap rows={daily} />
+            ) : tab === 'perpindahan' ? (
+              <TransitionRecap rows={transitions} />
+            ) : tab === 'sekarang' ? (
+              <CurrentState
+                summary={summary}
+                active={category}
+                onPick={(c) => {
+                  setCategory(c);
+                  setOpenApp(null);
+                  setPage(0);
+                }}
+              />
+            ) : (
+              <ApplicationTable
+                loading={isLoading}
+                rows={apps}
+                total={summary?.[category] ?? 0}
+                onPick={(id) => {
+                  setOpenApp(id);
+                  setPage(0);
+                  setSearch('');
+                  }}
+              />
+            )}
+          </section>
         </>
       )}
     </div>
@@ -390,29 +461,5 @@ function Card({ title, value, tone }: { title: string; value: string; tone?: str
         {value}
       </span>
     </div>
-  );
-}
-
-function Action({
-  icon: Icon,
-  children,
-  onClick,
-  busy,
-}: {
-  icon: typeof Download;
-  children: React.ReactNode;
-  onClick: () => void;
-  busy: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className="inline-flex h-9 items-center gap-1.5 rounded-control border border-hairline bg-surface-raised px-3 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-sunken disabled:opacity-50"
-    >
-      <Icon className="size-4" />
-      {children}
-    </button>
   );
 }
