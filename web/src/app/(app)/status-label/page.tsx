@@ -279,6 +279,7 @@ export default function StatusLabelPage() {
               category={category}
               total={history.data?.history.length ?? 0}
               caption="Total Perubahan Tercatat"
+              unit="kali"
             />
             {openContact ? (
               <>

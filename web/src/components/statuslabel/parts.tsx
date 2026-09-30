@@ -109,10 +109,19 @@ export function CategoryBanner({
   category,
   total,
   caption,
+  unit = 'Customer',
 }: {
   category: LabelCategory;
   total: number;
   caption?: string;
+  /**
+   * What is being counted.
+   *
+   * A prop rather than the word "Customer" baked in: the same banner heads the
+   * customer's own page, where the number is how many times their label has
+   * changed, and "5 Customer" under one person's name is simply wrong.
+   */
+  unit?: string;
 }) {
   const c = categoryOf(category);
   return (
@@ -123,7 +132,7 @@ export function CategoryBanner({
       </span>
       <span className="nums mt-1 block text-3xl font-semibold tracking-[-0.02em] text-ink">
         {total.toLocaleString('id-ID')}{' '}
-        <span className="text-base font-normal text-ink-muted">Customer</span>
+        <span className="text-base font-normal text-ink-muted">{unit}</span>
       </span>
     </div>
   );
