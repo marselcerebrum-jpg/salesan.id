@@ -128,7 +128,7 @@ export function PerformanceSummary({
   // the label most recently put on them. A state rather than an event, so it
   // takes no period — the card says as much.
   const labelCategories = useSWR<LabelCategoryResponse>(
-    labelCategoryPath({ transitions: false }),
+    labelCategoryPath({}, { transitions: false }),
     fetcher,
     { keepPreviousData: true },
   );

@@ -921,6 +921,7 @@ export type DrilldownResource =
   | 'follow-ups'
   | 'group-mentions'
   | 'label-events'
+  | 'label-category'
   | 'leads';
 
 /**
@@ -2075,39 +2076,30 @@ export interface LabelCategoryResponse {
 }
 
 /** The card, and the first level of drill-down when a category is named. */
-export function labelCategoryPath(params: {
-  category?: LabelCategory;
-  applicationId?: string | null;
-  accountId?: string | null;
-  from?: string;
-  to?: string;
-  transitions?: boolean;
-}) {
-  const q = new URLSearchParams();
-  if (params.category) q.set('category', params.category);
-  if (params.applicationId) q.set('application_id', params.applicationId);
-  if (params.accountId) q.set('account_id', params.accountId);
-  if (params.from) q.set('from', params.from);
-  if (params.to) q.set('to', params.to);
-  if (params.transitions === false) q.set('transitions', 'false');
-  return `/analytics/label-category?${q.toString()}`;
+export function labelCategoryPath(
+  query: AnalyticsQuery = {},
+  extra: { category?: LabelCategory; transitions?: boolean } = {},
+) {
+  const more: Record<string, string> = {};
+  if (extra.category) more.category = extra.category;
+  if (extra.transitions === false) more.transitions = 'false';
+  return analyticsPath('label-category', query, more);
 }
 
-export function labelCategoryContactsPath(params: {
-  category: LabelCategory;
-  applicationId?: string | null;
-  accountId?: string | null;
-  q?: string;
-  limit?: number;
-  offset?: number;
-}) {
-  const s = new URLSearchParams({ category: params.category });
-  if (params.applicationId) s.set('application_id', params.applicationId);
-  if (params.accountId) s.set('account_id', params.accountId);
-  if (params.q?.trim()) s.set('q', params.q.trim());
-  s.set('limit', String(params.limit ?? 50));
-  s.set('offset', String(params.offset ?? 0));
-  return `/analytics/label-category/contacts?${s.toString()}`;
+export function labelCategoryContactsPath(
+  query: AnalyticsQuery,
+  extra: { category: LabelCategory; q?: string; limit?: number; offset?: number },
+) {
+  const more: Record<string, string> = {
+    category: extra.category,
+    limit: String(extra.limit ?? 25),
+    offset: String(extra.offset ?? 0),
+  };
+  if (extra.q?.trim()) more.q = extra.q.trim();
+  return `${analyticsPath('label-category', query, more).replace(
+    '/analytics/label-category?',
+    '/analytics/label-category/contacts?',
+  )}`;
 }
 
 export function contactLabelHistoryPath(contactId: string) {
@@ -2115,19 +2107,13 @@ export function contactLabelHistoryPath(contactId: string) {
 }
 
 /** Downloads the report. `scope` picks the shape: movement, or one row per customer. */
-export async function exportLabelCategory(params: {
-  scope: 'summary' | 'detail';
-  format: 'csv' | 'xlsx';
-  category?: LabelCategory;
-  applicationId?: string | null;
-  from?: string;
-  to?: string;
-}) {
-  const s = new URLSearchParams({ scope: params.scope, format: params.format });
-  if (params.category) s.set('category', params.category);
-  if (params.applicationId) s.set('application_id', params.applicationId);
-  if (params.from) s.set('from', params.from);
-  if (params.to) s.set('to', params.to);
+export async function exportLabelCategory(
+  query: AnalyticsQuery,
+  params: { scope: 'summary' | 'detail'; format: 'csv' | 'xlsx'; category?: LabelCategory },
+) {
+  const more: Record<string, string> = { scope: params.scope, format: params.format };
+  if (params.category) more.category = params.category;
+  const s = analyticsSearch(query, more).replace(/^\?/, '');
 
   const token = await accessToken();
   const headers = new Headers();

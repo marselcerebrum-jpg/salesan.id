@@ -127,7 +127,7 @@ function Dashboard() {
    * and the card says so.
    */
   const labelCategories = useSWR<LabelCategoryResponse>(
-    labelCategoryPath({ transitions: false }),
+    labelCategoryPath({}, { transitions: false }),
     fetcher,
     { keepPreviousData: true },
   );
