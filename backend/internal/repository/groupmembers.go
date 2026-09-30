@@ -103,8 +103,17 @@ func (r *Repo) RecordGroupMemberChanges(
 		return 0, 0, tx.Commit(ctx)
 	}
 
-	// The day's row carries the count as it stands after this batch, so the
-	// anchor and the tally are written from the same moment and cannot disagree.
+	// The tally is this layer's to keep; the head count is not.
+	//
+	// One group is often watched by three of our numbers, and each keeps its own
+	// copy of the member list. When somebody leaves, only the number that heard
+	// it first has removed them at this instant, so a count taken now reads the
+	// other two copies as well and reports the group as larger than it is. That
+	// is what happened: four people left and the stored total did not move.
+	//
+	// So the count written here is a starting value for a brand new row only —
+	// on conflict it is left alone, and the hourly head count, taken when every
+	// copy has caught up, is what corrects it.
 	//
 	// Dated by the notification, not by now(): an event that arrives late
 	// because this process was restarting belongs to the day it happened on.
@@ -125,10 +134,9 @@ func (r *Repo) RecordGroupMemberChanges(
 		-- until there is a real one to record.
 		having coalesce(max(mem.n), 0) > 0
 		on conflict (workspace_id, chat_jid, day) do update
-		   set member_count = excluded.member_count,
-		       joined       = public.group_member_daily.joined + excluded.joined,
-		       left_count   = public.group_member_daily.left_count + excluded.left_count,
-		       updated_at   = now()`,
+		   set joined     = public.group_member_daily.joined + excluded.joined,
+		       left_count = public.group_member_daily.left_count + excluded.left_count,
+		       updated_at = now()`,
 		workspaceID, chatJID, at, joined, left); err != nil {
 		return 0, 0, err
 	}
@@ -282,11 +290,17 @@ func (r *Repo) GroupMemberHistory(
 // SnapshotGroupMemberCounts writes today's head count for every group that has
 // one, without touching the day's arrival and departure tallies.
 //
-// This is the anchor. Notifications go missing — a socket drops, this process
-// restarts, WhatsApp does not replay what happened while nobody was listening —
-// and a history derived only from arrivals and departures would carry every one
-// of those gaps forward forever. A head count taken once a day means a missed
-// notification spoils one day's tally and nothing else.
+// This is the anchor, and it is the only thing that writes the head count.
+// Notifications go missing — a socket drops, this process restarts, WhatsApp
+// does not replay what happened while nobody was listening — and a history
+// derived only from arrivals and departures would carry every one of those gaps
+// forward forever. A head count taken regularly means a missed notification
+// spoils one day's tally and nothing else.
+//
+// Taken regularly rather than at a single moment for a second reason: when
+// several of our numbers share a group, their copies of the member list catch
+// up at slightly different times, and a count read the instant a notification
+// lands sees the ones that have not. An hour later they agree.
 func (r *Repo) SnapshotGroupMemberCounts(ctx context.Context) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		insert into public.group_member_daily

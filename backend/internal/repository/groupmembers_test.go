@@ -217,6 +217,71 @@ func TestIntegrationGroupMemberSnapshotAnchorsTheDay(t *testing.T) {
 	}
 }
 
+// The head count belongs to the hourly snapshot, not to the notifications.
+//
+// Three of our numbers in one group keep three copies of the member list, and
+// when somebody leaves only the number that heard it first has removed them.
+// A count taken at that instant reads the stale copies too and reports the
+// group as larger than it is — which it did, until this was separated.
+func TestIntegrationGroupMemberEventsDoNotOverwriteTheHeadCount(t *testing.T) {
+	f, chatJID := groupFixture(t)
+	ctx := context.Background()
+	f.seedMembers(t,
+		"628000000001@s.whatsapp.net",
+		"628000000002@s.whatsapp.net",
+		"628000000003@s.whatsapp.net")
+
+	// The snapshot records the truth of the moment.
+	if _, err := f.repo.SnapshotGroupMemberCounts(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// A departure arrives. The member list has not caught up yet, which is
+	// exactly the situation this guards.
+	if _, _, err := f.repo.RecordGroupMemberChanges(ctx, f.workspaceID, chatJID, f.accountID, "",
+		time.Now().UTC(),
+		[]GroupMemberChange{{ParticipantJID: "628000000003@s.whatsapp.net", Leaving: true}}); err != nil {
+		t.Fatal(err)
+	}
+
+	history, _, err := f.repo.GroupMemberHistory(
+		ctx, f.workspaceID, chatJID, jakartaNow().Year(), int(jakartaNow().Month()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history has %d days, want 1", len(history))
+	}
+	if history[0].MemberCount != 3 {
+		t.Errorf("head count = %d, want the snapshot's 3: a notification must not write it",
+			history[0].MemberCount)
+	}
+	if history[0].Left != 1 {
+		t.Errorf("departures = %d, want 1: the tally is the notification's to keep",
+			history[0].Left)
+	}
+
+	// Once the list catches up, the next snapshot is what corrects the count.
+	if err := f.repo.RemoveGroupMembers(ctx, f.conversationID,
+		[]string{"628000000003@s.whatsapp.net"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.SnapshotGroupMemberCounts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	history, _, err = f.repo.GroupMemberHistory(
+		ctx, f.workspaceID, chatJID, jakartaNow().Year(), int(jakartaNow().Month()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history[0].MemberCount != 2 {
+		t.Errorf("head count after the list caught up = %d, want 2", history[0].MemberCount)
+	}
+	if history[0].Left != 1 {
+		t.Errorf("the snapshot changed the tally to %d; it must not touch it", history[0].Left)
+	}
+}
+
 func (f *fixture) memberCount(t *testing.T) int {
 	t.Helper()
 	var n int
