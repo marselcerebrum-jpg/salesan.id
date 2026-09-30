@@ -110,7 +110,7 @@ func TestIntegrationGroupMemberDeltaIsNet(t *testing.T) {
 		t.Errorf("net change = %d, want 1 (two in, one out)", deltas[chatJID])
 	}
 
-	history, err := f.repo.GroupMemberHistory(ctx, f.workspaceID, chatJID, 7)
+	history, _, err := f.repo.GroupMemberHistory(ctx, f.workspaceID, chatJID, jakartaNow().Year(), int(jakartaNow().Month()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestIntegrationGroupMemberSkipsAnchorForUnfetchedGroup(t *testing.T) {
 		t.Errorf("the arrival was not recorded: delta = %d, want 1", deltas[chatJID])
 	}
 
-	history, err := f.repo.GroupMemberHistory(ctx, f.workspaceID, chatJID, 7)
+	history, _, err := f.repo.GroupMemberHistory(ctx, f.workspaceID, chatJID, jakartaNow().Year(), int(jakartaNow().Month()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestIntegrationGroupMemberSnapshotAnchorsTheDay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	history, err := f.repo.GroupMemberHistory(ctx, f.workspaceID, chatJID, 7)
+	history, _, err := f.repo.GroupMemberHistory(ctx, f.workspaceID, chatJID, jakartaNow().Year(), int(jakartaNow().Month()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,4 +226,14 @@ func (f *fixture) memberCount(t *testing.T) int {
 		t.Fatalf("count members: %v", err)
 	}
 	return n
+}
+
+// jakartaNow is the clock the day boundaries are drawn on, so a test running at
+// 23:30 UTC asks for the same month the code under test would have picked.
+func jakartaNow() time.Time {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		loc = time.FixedZone("WIB", 7*60*60)
+	}
+	return time.Now().In(loc)
 }

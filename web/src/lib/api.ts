@@ -1722,21 +1722,41 @@ export interface GroupDetail {
 }
 
 /**
- * One group's head count, day by day.
+ * One group's head count, day by day, for one calendar month.
  *
- * A path rather than a fetch so the panel can hand it to SWR and get caching
- * and revalidation for free, the same way the member list does.
+ * A path rather than a fetch so the page can hand it to SWR and get caching and
+ * revalidation for free, the same way the member list does.
+ *
+ * A month rather than a rolling window: two people opening the same group on
+ * different days should be looking at the same period, and "30 hari terakhir"
+ * is a different period for each of them.
  *
  * Days with nothing recorded are absent from the answer, and that is
- * deliberate: this only began being recorded when the feature shipped, and a
- * gap has to look like a gap rather than like a day the group lost everybody.
+ * deliberate: this only began being kept when the feature shipped, and a gap
+ * has to look like a gap rather than like a day the group lost everybody.
  */
-export function groupMemberHistoryPath(chatJid: string, days = 30) {
-  return `/groups/members/history?chat_jid=${encodeURIComponent(chatJid)}&days=${days}`;
+export function groupMemberHistoryPath(chatJid: string, year: number, month: number) {
+  return (
+    `/groups/members/history?chat_jid=${encodeURIComponent(chatJid)}` +
+    `&year=${year}&month=${month}`
+  );
+}
+
+/** The group history page's own route. */
+export function groupHistoryHref(chatJid: string) {
+  return `/groups/${encodeURIComponent(chatJid)}/riwayat`;
 }
 
 export interface GroupMemberHistory {
   days: GroupMemberDay[];
+  /**
+   * The earliest day anything was recorded for this group, or "" when nothing
+   * has been. The filter uses it to stop offering months that were never
+   * watched, rather than promising a past that does not exist.
+   */
+  first_day: string;
+  year: number;
+  month: number;
 }
 
 /** The detail page's own route, for linking a directory row to it. */

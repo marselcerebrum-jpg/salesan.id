@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -188,45 +189,57 @@ type GroupMemberDay struct {
 	Left        int    `json:"left"`
 }
 
-// GroupMemberHistory is the last `days` days for one group, oldest first.
+// GroupMemberHistory is one calendar month for one group, oldest day first,
+// plus the earliest day ever recorded for it.
+//
+// A month rather than a rolling window because that is what the screen asks
+// for, and because a rolling window makes two people looking at the same group
+// on different days see different numbers with no way to say which period they
+// meant.
+//
+// firstDay is empty until something has been recorded. The screen uses it to
+// avoid offering months that cannot contain anything: this began being kept
+// the day it shipped, and a filter that cheerfully offers last year would be
+// promising a past that does not exist.
 //
 // Days on which nothing happened are absent. Filling them in belongs to the
-// screen, which knows how wide its chart is; inventing rows here would make the
-// gap between "no change" and "we were not watching yet" invisible, and for a
-// feature that starts with no past at all that distinction is the whole story.
+// screen, which knows how wide its chart is; inventing rows here would hide the
+// difference between "no change" and "we were not watching yet".
 func (r *Repo) GroupMemberHistory(
-	ctx context.Context, workspaceID uuid.UUID, chatJID string, days int,
-) ([]GroupMemberDay, error) {
-	if days <= 0 || days > 365 {
-		days = 30
+	ctx context.Context, workspaceID uuid.UUID, chatJID string, year, month int,
+) (days []GroupMemberDay, firstDay string, err error) {
+	if month < 1 || month > 12 {
+		return nil, "", fmt.Errorf("bulan %d di luar 1..12", month)
+	}
+	if year < 2000 || year > 3000 {
+		return nil, "", fmt.Errorf("tahun %d di luar jangkauan", year)
 	}
 
-	// Today is always present, even before anything has been written down.
-	//
-	// This began being recorded the day it shipped, so every group starts with
-	// no past at all. Without a line for today the panel would open on "belum
-	// ada riwayat" for a group that plainly has members, which reads as broken
-	// rather than as new. Today's head count with nothing moving is the honest
-	// starting point: the count is real, and the zeroes are true — nobody has
-	// been seen arriving or leaving yet.
 	rows, err := r.pool.Query(ctx, `
-		with recorded as (
-		  select day, member_count, joined, left_count
-		    from public.group_member_daily
-		   where workspace_id = $1 and chat_jid = $2
-		     and day > (now() at time zone 'Asia/Jakarta')::date - $3::int
+		with bulan as (
+		  select make_date($3::int, $4::int, 1) as awal
 		),
+		recorded as (
+		  select d.day, d.member_count, d.joined, d.left_count
+		    from public.group_member_daily d, bulan b
+		   where d.workspace_id = $1 and d.chat_jid = $2
+		     and d.day >= b.awal and d.day < b.awal + interval '1 month'
+		),
+		-- Today's head count stands in when the month being looked at is the
+		-- one we are living in and nothing has been written for today yet.
+		-- Without it a group plainly full of people opens on an empty screen,
+		-- which reads as broken rather than as new. Never applied to a past
+		-- month: today's count is not a fact about August.
 		baseline as (
 		  select (now() at time zone 'Asia/Jakarta')::date as day,
 		         coalesce(max(mem.n), 0) as member_count, 0 as joined, 0 as left_count
-		    from public.conversations c
+		    from public.conversations c, bulan b
 		    left join lateral (
 		      select count(*) as n from public.conversation_members m
 		       where m.conversation_id = c.id
 		    ) mem on true
 		   where c.workspace_id = $1 and c.chat_jid = $2
-		  -- A group nobody has fetched has no count to start from, so it gets
-		  -- no starting line either. Zero members is not a fact about it.
+		     and date_trunc('month', (now() at time zone 'Asia/Jakarta')::date) = b.awal
 		  having coalesce(max(mem.n), 0) > 0
 		)
 		select to_char(day, 'YYYY-MM-DD'), member_count, joined, left_count from recorded
@@ -234,21 +247,36 @@ func (r *Repo) GroupMemberHistory(
 		select to_char(b.day, 'YYYY-MM-DD'), b.member_count, b.joined, b.left_count
 		  from baseline b
 		 where not exists (select 1 from recorded r where r.day = b.day)
-		 order by 1 asc`, workspaceID, chatJID, days)
+		 order by 1 asc`, workspaceID, chatJID, year, month)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
-	out := []GroupMemberDay{}
+	days = []GroupMemberDay{}
 	for rows.Next() {
 		var d GroupMemberDay
 		if err := rows.Scan(&d.Day, &d.MemberCount, &d.Joined, &d.Left); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		out = append(out, d)
+		days = append(days, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+
+	var earliest *string
+	if err := r.pool.QueryRow(ctx, `
+		select to_char(min(day), 'YYYY-MM-DD')
+		  from public.group_member_daily
+		 where workspace_id = $1 and chat_jid = $2`, workspaceID, chatJID,
+	).Scan(&earliest); err != nil {
+		return nil, "", err
+	}
+	if earliest != nil {
+		firstDay = *earliest
+	}
+	return days, firstDay, nil
 }
 
 // SnapshotGroupMemberCounts writes today's head count for every group that has

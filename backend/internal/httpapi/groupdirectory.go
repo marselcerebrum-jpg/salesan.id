@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/salesan/omnichannel/backend/internal/analytics"
 	"github.com/salesan/omnichannel/backend/internal/models"
 )
 
@@ -63,7 +64,12 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGroupMemberHistory returns one group's head count day by day.
+// handleGroupMemberHistory returns one group's head count day by day, for one
+// calendar month.
+//
+// The month defaults to the one the reader is living in, which is Jakarta's,
+// not the server's. At seven in the morning UTC those are different months
+// twice a year, and the page would open on the wrong one.
 func (s *Server) handleGroupMemberHistory(w http.ResponseWriter, r *http.Request) {
 	user := userFrom(r.Context())
 	chatJID := strings.TrimSpace(r.URL.Query().Get("chat_jid"))
@@ -71,14 +77,25 @@ func (s *Server) handleGroupMemberHistory(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "missing_group", "Grup tidak disebutkan")
 		return
 	}
-	days := queryInt(r, "days", 30)
 
-	history, err := s.repo.GroupMemberHistory(r.Context(), user.WorkspaceID, chatJID, days)
+	now := time.Now().In(analytics.Jakarta)
+	year := queryInt(r, "year", now.Year())
+	month := queryInt(r, "month", int(now.Month()))
+
+	history, firstDay, err := s.repo.GroupMemberHistory(
+		r.Context(), user.WorkspaceID, chatJID, year, month)
 	if err != nil {
-		writeAppError(w, err)
+		writeError(w, http.StatusBadRequest, "invalid_period", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"days": history})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"days": history,
+		// The earliest day this group has anything for, so the filter can stop
+		// offering months that were never recorded.
+		"first_day": firstDay,
+		"year":      year,
+		"month":     month,
+	})
 }
 
 func (s *Server) handleGroupDirectoryFacets(w http.ResponseWriter, r *http.Request) {

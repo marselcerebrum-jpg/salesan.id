@@ -16,13 +16,13 @@ import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { FilterChips } from '@/components/contacts/FilterChips';
-import { MemberHistoryPanel } from '@/components/groups/MemberHistoryPanel';
 import { EmptyState, ErrorNote, Spinner } from '@/components/ui/Primitives';
 import {
   exportGroups,
   fetchGroups,
   fetcher,
   groupDetailHref,
+  groupHistoryHref,
   groupFacetsPath,
   groupsPath,
   type GroupQuery,
@@ -122,10 +122,6 @@ export default function GroupsPage() {
       return next;
     });
   }
-
-  // Which group's history is open, or none. The row is held rather than the
-  // JID so the panel can title itself without looking the name up again.
-  const [historyOf, setHistoryOf] = useState<GroupRow | null>(null);
 
   const allOnPagePicked = groups.length > 0 && groups.every((g) => picked.has(g.chat_jid));
 
@@ -457,14 +453,13 @@ export default function GroupsPage() {
                              "how did it get to this" is about, so it is what
                              opens the answer, rather than a separate icon
                              nobody would connect to it. */
-                          <button
-                            type="button"
-                            onClick={() => setHistoryOf(group)}
+                          <Link
+                            href={groupHistoryHref(group.chat_jid)}
                             aria-label={`Riwayat anggota ${label} per hari`}
                             className="rounded px-1 underline decoration-dotted underline-offset-4 transition-colors hover:text-ink"
                           >
                             {group.member_count.toLocaleString('id-ID')}
-                          </button>
+                          </Link>
                         ) : (
                           '–'
                         )}
@@ -507,12 +502,6 @@ export default function GroupsPage() {
         ) : null}
       </div>
 
-      <MemberHistoryPanel
-        open={historyOf !== null}
-        onClose={() => setHistoryOf(null)}
-        chatJid={historyOf?.chat_jid ?? ''}
-        groupName={historyOf?.name || historyOf?.chat_jid || ''}
-      />
     </div>
   );
 }
