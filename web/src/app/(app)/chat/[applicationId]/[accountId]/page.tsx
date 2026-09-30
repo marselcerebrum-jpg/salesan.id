@@ -178,6 +178,22 @@ function Inbox() {
   const [filters, setFilters] = useState<InboxFilters>(EMPTY_FILTERS);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * The thread being read, held apart from the filtered list.
+   *
+   * Opening a chat marks it read, which is correct, and under "Belum dibaca"
+   * that immediately stops it matching. The row vanished from under the
+   * operator's cursor and the thread beside it closed to "Pilih percakapan" —
+   * so the one filter meant for working through unread chats could not be used
+   * to read a single one of them.
+   *
+   * The index is kept with it so the row goes back exactly where it was rather
+   * than jumping to the top. The list is ordered by columns this side does not
+   * have, so any attempt to re-sort it here would move other rows too.
+   */
+  const [reading, setReading] = useState<{ conversation: Conversation; index: number } | null>(
+    null,
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -244,12 +260,36 @@ function Inbox() {
   const selected = useMemo(
     () =>
       conversations.find((c) => c.id === selectedId) ??
+      // Still open even once the filter has stopped matching it.
+      (reading && reading.conversation.id === selectedId ? reading.conversation : null) ??
       // A deep-linked thread may sit outside the loaded page of the list — an
       // older conversation still waiting for a reply, for instance. It is
       // fetched on its own so the link lands rather than silently doing nothing.
       (deepLinked && deepLinked.id === selectedId ? deepLinked : null),
-    [conversations, selectedId, deepLinked],
+    [conversations, selectedId, deepLinked, reading],
   );
+
+  // A filter the operator changed on purpose should filter. Holding a row is
+  // for the list moving underneath them while they read, not for overriding
+  // what they have just asked to see.
+  useEffect(() => {
+    setReading(null);
+  }, [filters, debouncedSearch]);
+
+  /**
+   * The list as drawn: the filter's answer, plus the thread being read when the
+   * filter no longer returns it.
+   *
+   * Put back at the index it held, so nothing else on screen moves.
+   */
+  const listedConversations = useMemo(() => {
+    if (!reading || conversations.some((c) => c.id === reading.conversation.id)) {
+      return conversations;
+    }
+    const out = conversations.slice();
+    out.splice(Math.min(reading.index, out.length), 0, reading.conversation);
+    return out;
+  }, [conversations, reading]);
 
   const connected = account?.status === 'connected';
 
@@ -334,6 +374,14 @@ function Inbox() {
 
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id);
+    // Captured before the list refetches, which is what removes it.
+    setReading({
+      conversation,
+      index: Math.max(
+        0,
+        conversations.findIndex((c) => c.id === conversation.id),
+      ),
+    });
     setMessages([]);
     setUnreadMark(null);
     setMentionAnchor(null);
@@ -363,6 +411,23 @@ function Inbox() {
     if (unread > 0 || conversation.marked_unread || hadMention) {
       try {
         await markConversationRead(conversation.id);
+        // The held copy is corrected rather than left as it was read from the
+        // list: it is about to be the only source for this row, and a badge
+        // still claiming five unread on a thread the operator is looking at
+        // would be the same lie in a new place.
+        setReading((prev) =>
+          prev && prev.conversation.id === conversation.id
+            ? {
+                ...prev,
+                conversation: {
+                  ...prev.conversation,
+                  unread_count: 0,
+                  mention_count: 0,
+                  marked_unread: false,
+                },
+              }
+            : prev,
+        );
         void mutateList();
         void mutateCounts();
       } catch {
@@ -971,7 +1036,7 @@ function Inbox() {
 
         {view === 'chat' ? (
           <ConversationList
-            conversations={conversations}
+            conversations={listedConversations}
             counts={counts}
             labels={labels}
             filters={filters}
