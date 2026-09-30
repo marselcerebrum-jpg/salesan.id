@@ -865,3 +865,65 @@ type ShiftRef struct {
 	UserName string    `json:"user_name"`
 	WorkDate string    `json:"work_date"`
 }
+
+// --- Status Label: Cold / Warm / Hot ------------------------------------------
+//
+// Three categories sitting on top of WhatsApp's own labels, which are free text
+// typed on somebody's phone and number in the hundreds. A customer's category is
+// the temperature of the label most recently put on them.
+
+// LabelCategorySummary is the three numbers the dashboard card shows.
+//
+// A count of customers as they stand now, not of anything that happened in a
+// period: a customer tagged Hot in June is still Hot today.
+type LabelCategorySummary struct {
+	Cold int `json:"cold"`
+	Warm int `json:"warm"`
+	Hot  int `json:"hot"`
+}
+
+// LabelCategoryApplication is one brand's share of a category.
+type LabelCategoryApplication struct {
+	ApplicationID *uuid.UUID `json:"application_id"`
+	Code          string     `json:"code"`
+	Name          string     `json:"name"`
+	Color         string     `json:"color"`
+	Contacts      int        `json:"contacts"`
+}
+
+// LabelCategoryContact is one customer in the drill-down list.
+type LabelCategoryContact struct {
+	ContactID uuid.UUID `json:"contact_id"`
+	Name      string    `json:"name"`
+	Phone     string    `json:"phone"`
+	// LabelName is the actual WhatsApp label, not the category: an operator
+	// looking for a customer searches for the words on their own screen.
+	LabelName   string    `json:"label_name"`
+	Category    string    `json:"category"`
+	ChangeCount int       `json:"change_count"`
+	ChangedAt   time.Time `json:"changed_at"`
+}
+
+// ContactLabelHistoryRow is one step of one customer's journey.
+type ContactLabelHistoryRow struct {
+	At        time.Time `json:"at"`
+	EventType string    `json:"event_type"`
+	LabelName string    `json:"label_name"`
+	// Category is empty when the label is not one of the three, which is a
+	// normal thing to find in a timeline: a customer can be tagged "Premium"
+	// between two temperature changes.
+	Category string `json:"category"`
+	Source   string `json:"source"`
+	// ChangedBy is empty for anything done on the phone. WhatsApp does not say
+	// who was holding it, and guessing is not allowed.
+	ChangedBy string `json:"changed_by"`
+}
+
+// LabelCategoryTransition is one day's movement between two categories.
+type LabelCategoryTransition struct {
+	Day      string `json:"day"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Count    int    `json:"count"`
+	Contacts int    `json:"contacts"`
+}

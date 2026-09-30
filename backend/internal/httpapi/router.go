@@ -270,6 +270,15 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/analytics/follow-ups", s.handleFollowUpDrilldown)
 			r.Get("/analytics/group-mentions", s.handleGroupDrilldown)
 			r.Get("/analytics/label-events", s.handleLabelDrilldown)
+
+			// Status Label: Cold, Warm, Hot — the card, then one level of
+			// drill-down per click, then one customer's whole journey.
+			r.Route("/analytics/label-category", func(r chi.Router) {
+				r.Get("/", s.handleLabelCategorySummary)
+				r.Get("/contacts", s.handleLabelCategoryContacts)
+				r.Get("/contacts/{contactID}/history", s.handleContactLabelHistory)
+				r.Get("/export", s.handleExportLabelCategory)
+			})
 			r.Get("/analytics/leads", s.handleLeadDrilldown)
 
 			r.Route("/org", func(r chi.Router) {

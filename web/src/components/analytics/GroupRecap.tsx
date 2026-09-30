@@ -5,8 +5,11 @@ import {
   ChevronRight,
   CircleDashed,
   Clock,
+  Flame,
   MessageCircle,
   Radio,
+  Snowflake,
+  Sun,
   Tag,
   Ticket,
   Users,
@@ -17,7 +20,25 @@ import Link from 'next/link';
 import { DAILY_GROUPS, type DailyColumn } from '@/components/analytics/dailyColumns';
 import type { DrilldownKind } from '@/components/analytics/DrilldownPanel';
 import { InfoTip, RowSkeleton } from '@/components/analytics/Primitives';
+import type { LabelCategorySummary } from '@/lib/api';
 import type { LabelUsage, PerformanceDay } from '@/lib/types';
+
+/**
+ * The three tiles on the Status Label card.
+ *
+ * Kept beside the card rather than imported from the detail page: this is the
+ * shape of a summary, and the page below it owns the shape of a drill-down.
+ */
+const LABEL_CATEGORIES: {
+  id: keyof LabelCategorySummary;
+  label: string;
+  icon: LucideIcon;
+  tone: string;
+}[] = [
+  { id: 'cold', label: 'Cold', icon: Snowflake, tone: 'text-info' },
+  { id: 'warm', label: 'Warm', icon: Sun, tone: 'text-warn' },
+  { id: 'hot', label: 'Hot', icon: Flame, tone: 'text-danger' },
+];
 
 /**
  * The period's recap, group by group, over every application at once.
@@ -173,6 +194,7 @@ export function GroupRecap({
   previous,
   loading,
   labelUsage = [],
+  labelCategories,
   onDrill,
   columnDrills,
   omit = [],
@@ -190,6 +212,16 @@ export function GroupRecap({
    * names of our metrics.
    */
   labelUsage?: LabelUsage[];
+  /**
+   * Cold, Warm and Hot, when the caller has them.
+   *
+   * Given, the card shows these three instead of the label list. The list was
+   * the honest thing to show before there was anything better, but it printed
+   * whatever eight names happened to sort first out of seven hundred — "FU HOT",
+   * "Rabu", "SENIN" — and a card meant for reading the state of the book at a
+   * glance cannot be read at all that way.
+   */
+  labelCategories?: LabelCategorySummary;
   /** Opens the drilldown a card asks for. Without it the cards only link out. */
   onDrill?: (kind: DrilldownKind) => void;
   /**
@@ -294,7 +326,26 @@ export function GroupRecap({
                 {/* The operator's own labels, where there are any: on a card
                     called Status Label, "label" means Cold and Closing, not the
                     names of our counters. The counters follow underneath. */}
-                {card.group === 'label' && labelUsage.length > 0 ? (
+                {card.group === 'label' && labelCategories ? (
+                  <div className="grid grid-cols-3 gap-px border-t border-hairline bg-hairline">
+                    {LABEL_CATEGORIES.map((c) => (
+                      <Link
+                        key={c.id}
+                        href={`/status-label?kategori=${c.id}`}
+                        className="flex flex-col gap-0.5 bg-surface-raised px-3 py-2.5 transition-colors hover:bg-surface-sunken/60"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <c.icon className={clsx('size-3.5', c.tone)} aria-hidden />
+                          <span className="text-xs text-ink-soft">{c.label}</span>
+                        </span>
+                        <span className="nums text-lg font-semibold text-ink">
+                          {labelCategories[c.id].toLocaleString('id-ID')}
+                        </span>
+                        <span className="text-2xs text-ink-muted">Customer</span>
+                      </Link>
+                    ))}
+                  </div>
+                ) : card.group === 'label' && labelUsage.length > 0 ? (
                   <ul className="border-t border-hairline">
                     {labelUsage.slice(0, 8).map((u) => (
                       <li

@@ -13,7 +13,14 @@ import { GroupRecap } from '@/components/analytics/GroupRecap';
 import { QueueCard } from '@/components/analytics/QueueCard';
 import { ErrorState } from '@/components/analytics/Primitives';
 import { TrafficChart } from '@/components/analytics/TrafficChart';
-import { analyticsPath, fetcher, performancePath, type AnalyticsQuery } from '@/lib/api';
+import {
+  analyticsPath,
+  fetcher,
+  labelCategoryPath,
+  performancePath,
+  type AnalyticsQuery,
+  type LabelCategoryResponse,
+} from '@/lib/api';
 import { useRealtimeEvent } from '@/lib/realtime';
 import type { AnalyticsScope, LabelTransition, LabelUsage, PerformanceReport } from '@/lib/types';
 
@@ -117,6 +124,15 @@ export function PerformanceSummary({
     keepPreviousData: true,
   });
 
+  // Cold, Warm and Hot: each customer counted once, under the temperature of
+  // the label most recently put on them. A state rather than an event, so it
+  // takes no period — the card says as much.
+  const labelCategories = useSWR<LabelCategoryResponse>(
+    labelCategoryPath({ transitions: false }),
+    fetcher,
+    { keepPreviousData: true },
+  );
+
   /*
    * More than one day in the period.
    *
@@ -214,6 +230,7 @@ export function PerformanceSummary({
           previous={previous}
           loading={loading}
           labelUsage={labels.data?.usage ?? []}
+          labelCategories={labelCategories.data?.summary}
           onDrill={onDrill}
           columnDrills={COLUMN_DRILLS}
           omit={omit}

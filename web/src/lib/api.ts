@@ -2010,3 +2010,139 @@ export async function realtimeURL(): Promise<string | null> {
   const base = API_URL.replace(/^http/, 'ws');
   return `${base}/api/v1/ws?token=${encodeURIComponent(token)}`;
 }
+
+/* --- Status Label: Cold / Warm / Hot ---------------------------------------- */
+
+/**
+ * Three categories laid over WhatsApp's own labels.
+ *
+ * The labels themselves are free text typed on somebody's phone and run into
+ * the hundreds — "Cold", "fu cold", "DB COLD", "Pindahan COLD" are four names
+ * for one thing. A customer's category is the temperature of the label most
+ * recently put on them, so everyone lands in exactly one place.
+ */
+export type LabelCategory = 'cold' | 'warm' | 'hot';
+
+export interface LabelCategorySummary {
+  cold: number;
+  warm: number;
+  hot: number;
+}
+
+export interface LabelCategoryApplication {
+  application_id: string | null;
+  code: string;
+  name: string;
+  color: string;
+  contacts: number;
+}
+
+export interface LabelCategoryContact {
+  contact_id: string;
+  name: string;
+  phone: string;
+  /** The real WhatsApp label, not the category: it is what is on their screen. */
+  label_name: string;
+  category: LabelCategory;
+  change_count: number;
+  changed_at: string;
+}
+
+export interface ContactLabelHistoryRow {
+  at: string;
+  event_type: 'label_assigned' | 'label_removed';
+  label_name: string;
+  /** Empty when the label is not one of the three. */
+  category: LabelCategory | '';
+  source: 'web' | 'whatsapp' | 'system';
+  /** Empty for anything done on the phone; WhatsApp does not say who. */
+  changed_by: string;
+}
+
+export interface LabelCategoryTransition {
+  day: string;
+  from: LabelCategory;
+  to: LabelCategory;
+  count: number;
+  contacts: number;
+}
+
+export interface LabelCategoryResponse {
+  summary: LabelCategorySummary;
+  applications?: LabelCategoryApplication[];
+  transitions?: LabelCategoryTransition[];
+  category?: LabelCategory;
+}
+
+/** The card, and the first level of drill-down when a category is named. */
+export function labelCategoryPath(params: {
+  category?: LabelCategory;
+  applicationId?: string | null;
+  accountId?: string | null;
+  from?: string;
+  to?: string;
+  transitions?: boolean;
+}) {
+  const q = new URLSearchParams();
+  if (params.category) q.set('category', params.category);
+  if (params.applicationId) q.set('application_id', params.applicationId);
+  if (params.accountId) q.set('account_id', params.accountId);
+  if (params.from) q.set('from', params.from);
+  if (params.to) q.set('to', params.to);
+  if (params.transitions === false) q.set('transitions', 'false');
+  return `/analytics/label-category?${q.toString()}`;
+}
+
+export function labelCategoryContactsPath(params: {
+  category: LabelCategory;
+  applicationId?: string | null;
+  accountId?: string | null;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const s = new URLSearchParams({ category: params.category });
+  if (params.applicationId) s.set('application_id', params.applicationId);
+  if (params.accountId) s.set('account_id', params.accountId);
+  if (params.q?.trim()) s.set('q', params.q.trim());
+  s.set('limit', String(params.limit ?? 50));
+  s.set('offset', String(params.offset ?? 0));
+  return `/analytics/label-category/contacts?${s.toString()}`;
+}
+
+export function contactLabelHistoryPath(contactId: string) {
+  return `/analytics/label-category/contacts/${contactId}/history`;
+}
+
+/** Downloads the report. `scope` picks the shape: movement, or one row per customer. */
+export async function exportLabelCategory(params: {
+  scope: 'summary' | 'detail';
+  format: 'csv' | 'xlsx';
+  category?: LabelCategory;
+  applicationId?: string | null;
+  from?: string;
+  to?: string;
+}) {
+  const s = new URLSearchParams({ scope: params.scope, format: params.format });
+  if (params.category) s.set('category', params.category);
+  if (params.applicationId) s.set('application_id', params.applicationId);
+  if (params.from) s.set('from', params.from);
+  if (params.to) s.set('to', params.to);
+
+  const token = await accessToken();
+  const headers = new Headers();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const res = await fetch(`${API_URL}/api/v1/analytics/label-category/export?${s}`, { headers });
+  if (!res.ok) throw new ApiError(res.status, 'export_failed', 'Gagal mengunduh laporan.');
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download =
+    filenameFrom(res.headers.get('Content-Disposition')) ??
+    `status-label-${params.scope}.${params.format}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

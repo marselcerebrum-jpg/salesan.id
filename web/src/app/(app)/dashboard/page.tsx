@@ -29,6 +29,8 @@ import {
   dashboardPath,
   fetcher,
   type DashboardStats,
+  labelCategoryPath,
+  type LabelCategoryResponse,
 } from '@/lib/api';
 import { todayWIB, useAnalyticsFilter } from '@/lib/useAnalyticsFilter';
 import type { DashboardSummary, FilterOptions, LabelUsage } from '@/lib/types';
@@ -109,6 +111,23 @@ function Dashboard() {
    */
   const labels = useSWR<{ usage: LabelUsage[] }>(
     analyticsPath('label-events', query, { events: 'false' }),
+    fetcher,
+    { keepPreviousData: true },
+  );
+
+  /*
+   * Cold, Warm and Hot: the same customers as above, counted once each.
+   *
+   * A separate call because it answers a different question. The usage figures
+   * are per label and a customer appears under every label they carry; these
+   * three put each customer in exactly one place, which is what makes them
+   * addable and what makes the card readable.
+   *
+   * Not filtered by the period, deliberately — these are a state, not an event,
+   * and the card says so.
+   */
+  const labelCategories = useSWR<LabelCategoryResponse>(
+    labelCategoryPath({ transitions: false }),
     fetcher,
     { keepPreviousData: true },
   );
@@ -304,6 +323,7 @@ function Dashboard() {
           previous={prior.data?.summary}
           loading={report.isLoading}
           labelUsage={labels.data?.usage ?? []}
+          labelCategories={labelCategories.data?.summary}
           onDrill={setDrill}
         />
       </div>
