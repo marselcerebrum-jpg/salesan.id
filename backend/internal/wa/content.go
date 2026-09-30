@@ -277,7 +277,16 @@ func messageKind(msg *waE2E.Message) string {
 		return "(tanpa isi)"
 	}
 	sort.Strings(names)
-	return strings.Join(names, "+")
+	kind := strings.Join(names, "+")
+
+	// A secret payload is a whole family behind one field name — an edit to a
+	// message, to a poll, to a scheduled send — and knowing which is the
+	// difference between "we cannot read edits" and a guess. It is the only
+	// field whose name alone says too little, so it is the only one expanded.
+	if sec := msg.GetSecretEncryptedMessage(); sec != nil {
+		kind += "/" + sec.GetSecretEncType().String()
+	}
+	return kind
 }
 
 // phoneFromJID returns the bare phone number for a real user JID, or "" for
