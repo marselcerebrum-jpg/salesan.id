@@ -186,3 +186,48 @@ func TestIntegrationLabelCategoryBreakdownMatchesSummary(t *testing.T) {
 			len(contacts), n, summary.Hot)
 	}
 }
+
+// The movement table is read straight into a spreadsheet, so every column has
+// to come back in the shape Go asked for. This caught a date being scanned into
+// a string only after it reached production once; it will not need to again.
+func TestIntegrationLabelCategoryTransitionsScan(t *testing.T) {
+	f := newFixture(t, models.ConversationTypePersonal)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	cold := f.labelNamed(t, "Cold", now.Add(-2*time.Hour))
+	hot := f.labelNamed(t, "FU HOT", now.Add(-1*time.Hour))
+
+	// A move is a removal followed by an assignment; neither side ever sends
+	// "moved", so the pair is what the query looks for.
+	for _, e := range []LabelEventInput{
+		{AccountID: f.accountID, EventType: LabelEventRemoved, FromLabelID: &cold,
+			Source: ChangeSourceWeb, OccurredAt: now.Add(-90 * time.Minute),
+			EventKey: "uji-keluar-cold"},
+		{AccountID: f.accountID, EventType: LabelEventAssigned, ToLabelID: &hot,
+			Source: ChangeSourceWeb, OccurredAt: now.Add(-89 * time.Minute),
+			EventKey: "uji-masuk-hot"},
+	} {
+		// The contact is resolved from the conversation by the writer, which is
+		// what keeps the history attached even when a chat is later removed.
+		e.ConversationID = &f.conversationID
+		if _, err := f.repo.RecordLabelEvent(ctx, e); err != nil {
+			t.Fatalf("record %s: %v", e.EventType, err)
+		}
+	}
+
+	rows, err := f.repo.LabelCategoryTransitions(ctx, f.analyticsScope(), models.AnalyticsFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no movement found; the removal and the assignment should have paired")
+	}
+	got := rows[0]
+	if got.From != "cold" || got.To != "hot" {
+		t.Errorf("movement = %s to %s, want cold to hot", got.From, got.To)
+	}
+	if len(got.Day) != 10 {
+		t.Errorf("day = %q, want a YYYY-MM-DD date", got.Day)
+	}
+}

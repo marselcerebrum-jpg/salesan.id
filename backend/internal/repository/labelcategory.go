@@ -255,7 +255,11 @@ func (r *Repo) LabelCategoryTransitions(
 	windowArg := q.add(fmt.Sprintf("%d seconds", int(TransitionWindow.Seconds())))
 
 	sql := `
-		select (le.occurred_at ` + jakartaDate + ` as hari,
+		-- Rendered as text here rather than scanned as a date: the row is on its
+		-- way to a JSON field and a spreadsheet cell, both of which want the day
+		-- the Jakarta calendar calls it, not a timestamp a driver has to guess
+		-- a zone for.
+		select to_char((le.occurred_at ` + jakartaDate + `, 'YYYY-MM-DD') as hari,
 		       public.label_category_of(prev.from_label_name) as dari,
 		       public.label_category_of(le.to_label_name) as ke,
 		       count(*) as jumlah,
