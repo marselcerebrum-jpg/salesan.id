@@ -175,6 +175,22 @@ func (s *Server) handleExportLabelCategory(w http.ResponseWriter, r *http.Reques
 				strconv.Itoa(d.Cold + d.Warm + d.Hot),
 			})
 		}
+
+		// The same closing row the screen shows, and for the same reason: it is
+		// not the sum of the column. A customer labelled Cold on Monday and Warm
+		// on Thursday appears on both days above, and holds one label today.
+		// Leaving it out of the file would let a spreadsheet add the column and
+		// arrive at a number of customers that does not exist.
+		now, err := s.repo.LabelCategorySummary(r.Context(), sc, f)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		rows = append(rows, []string{
+			"total (kondisi sekarang)",
+			strconv.Itoa(now.Cold), strconv.Itoa(now.Warm), strconv.Itoa(now.Hot),
+			strconv.Itoa(now.Cold + now.Warm + now.Hot),
+		})
 	} else if shape == "summary" {
 		moves, err := s.repo.LabelCategoryTransitions(r.Context(), sc, f)
 		if err != nil {

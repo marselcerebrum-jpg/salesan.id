@@ -397,7 +397,7 @@ export default function StatusLabelPage() {
             </div>
 
             {tab === 'harian' ? (
-              <DailyRecap rows={daily} />
+              <DailyRecap rows={daily} current={summary} />
             ) : tab === 'perpindahan' ? (
               <TransitionRecap rows={transitions} />
             ) : tab === 'sekarang' ? (

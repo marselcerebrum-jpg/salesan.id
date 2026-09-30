@@ -494,16 +494,22 @@ export function TransitionRecap({ rows }: { rows: LabelCategoryTransition[] }) {
  * in one table without a word would invite them to be read as the same thing on
  * different days.
  */
-export function DailyRecap({ rows }: { rows: LabelCategoryDay[] }) {
-  const totals = useMemo(
-    () =>
-      rows.reduce(
-        (a, r) => ({ cold: a.cold + r.cold, warm: a.warm + r.warm, hot: a.hot + r.hot }),
-        { cold: 0, warm: 0, hot: 0 },
-      ),
-    [rows],
-  );
-
+export function DailyRecap({
+  rows,
+  current,
+}: {
+  rows: LabelCategoryDay[];
+  /**
+   * How many customers hold each label right now.
+   *
+   * The Total row, and deliberately not the sum of the column above it. Five
+   * customers labelled Cold on Monday is five things that happened; if one of
+   * them has since become Warm, four hold the label today. Adding the column
+   * would count that person in Cold forever and in Warm as well, and the
+   * "total" would drift further from the truth every day the book is worked.
+   */
+  current: LabelCategorySummary | undefined;
+}) {
   if (rows.length === 0) {
     return (
       <div className="p-6">
@@ -543,17 +549,37 @@ export function DailyRecap({ rows }: { rows: LabelCategoryDay[] }) {
           </tr>
         ))}
         <tr className="bg-surface-sunken/50">
-          <td className="px-4 py-2 text-sm font-medium text-ink">Total</td>
+          <td className="px-4 py-2 text-sm font-medium text-ink">
+            Total
+            <span className="ml-1.5 text-2xs font-normal text-ink-muted">kondisi sekarang</span>
+          </td>
           {CATEGORIES.map((c) => (
             <td key={c.id} className="nums px-4 py-2 text-right font-semibold text-ink">
-              {totals[c.id]}
+              {current ? current[c.id].toLocaleString('id-ID') : '–'}
             </td>
           ))}
           <td className="nums px-4 py-2 text-right font-semibold text-ink">
-            {totals.cold + totals.warm + totals.hot}
+            {current
+              ? (current.cold + current.warm + current.hot).toLocaleString('id-ID')
+              : '–'}
           </td>
         </tr>
       </tbody>
+      {/*
+        Spelled out because the arithmetic looks broken otherwise. A reader who
+        adds the column and gets a bigger number than the total is right about
+        the addition and wrong about what the rows mean, and there is no way to
+        tell which from the numbers alone.
+      */}
+      <tfoot>
+        <tr>
+          <td colSpan={5} className="px-4 py-2 text-2xs text-ink-muted">
+            Baris harian adalah jumlah customer yang diberi label itu pada hari tersebut. Total
+            bukan penjumlahan kolomnya, melainkan jumlah customer yang memegang label itu sekarang
+            — angkanya lebih kecil bila sebagian sudah berpindah status.
+          </td>
+        </tr>
+      </tfoot>
     </table>
   );
 }
