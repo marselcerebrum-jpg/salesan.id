@@ -90,9 +90,19 @@ export function filesFromClipboard(data: DataTransfer | null): File[] {
   const seen = new Set<string>();
   const take = (file: File | null) => {
     if (!file || file.size === 0) return;
-    // Name, size and mtime together: enough to spot the same file arriving
-    // through both channels, and cheap.
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    // Name, size and type — deliberately not the modification time.
+    //
+    // A pasted screenshot arrives through both channels below, and
+    // `getAsFile()` builds a fresh File whose `lastModified` is the moment it
+    // was called. When that call lands a millisecond later than the one behind
+    // `data.files`, the two copies of a single screenshot disagree about their
+    // mtime, the key differs, and both survive. The operator pastes once and
+    // the customer receives the picture twice.
+    //
+    // It is the mtime that carries no information here: the clipboard has no
+    // file on disk to have modified, so the browser invents the value at the
+    // moment it is asked. Name, size and type are what the paste actually said.
+    const key = `${file.name}:${file.size}:${file.type}`;
     if (seen.has(key)) return;
     seen.add(key);
     out.push(file);
