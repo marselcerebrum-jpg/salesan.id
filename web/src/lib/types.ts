@@ -1634,3 +1634,33 @@ export interface ConversationDeletedPayload {
   /** True when only the history was cleared and the thread itself stays. */
   cleared: boolean;
 }
+
+/**
+ * One number's answer to "can this read its labels right now".
+ *
+ * Separate from `Account.label_sync_state` on purpose. That field is what the
+ * indicator says, and the indicator settles to "synced" once an account stops
+ * waiting for a phone that will not answer — which is how seven numbers read
+ * green for six days while two of them held no labels at all.
+ */
+export interface LabelHealth {
+  account_id: string;
+  name: string;
+  label: string | null;
+  phone_number: string | null;
+  application_name: string | null;
+  status: string;
+  read_at: string | null;
+  stale_since: string | null;
+  stale_hours: number;
+  reason: string | null;
+  label_count: number;
+  severity: 'sehat' | 'tertinggal' | 'buta';
+}
+
+export interface LabelHealthReport {
+  accounts: LabelHealth[];
+  blind: number;
+  stale: number;
+  needs_phone: number;
+}

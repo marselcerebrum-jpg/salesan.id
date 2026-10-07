@@ -112,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/", s.handleListAccounts)
 				r.Post("/", s.handleCreateAccount)
 				r.Get("/stats", s.handleAccountStats)
+				r.Get("/label-health", s.handleLabelHealth)
 
 				// Everything below reaches one number by id, which bypasses
 				// every list that narrows by application. The guard stands

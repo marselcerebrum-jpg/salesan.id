@@ -365,6 +365,7 @@ func (s *Session) syncAppState(ctx context.Context, force bool) appStateOutcome 
 		// 1. Incremental: cheap, and preserves the stored version.
 		lastErr := s.client.FetchAppState(ctx, name, false, false)
 		if lastErr == nil {
+			out.OK = append(out.OK, string(name))
 			continue
 		}
 
@@ -376,6 +377,7 @@ func (s *Session) syncAppState(ctx context.Context, force bool) appStateOutcome 
 		if force {
 			if full := s.client.FetchAppState(ctx, name, true, false); full == nil {
 				s.log.Debug("app state repaired by full sync", "patch", name, "incremental_err", lastErr)
+				out.OK = append(out.OK, string(name))
 				continue
 			} else {
 				lastErr = full
@@ -406,6 +408,13 @@ func (s *Session) syncAppState(ctx context.Context, force bool) appStateOutcome 
 
 // appStateOutcome separates "asked the phone to fix it" from "genuinely broken".
 type appStateOutcome struct {
+	// OK names the collections that decoded. It is the only honest answer to
+	// "are this number's labels readable", and nothing else in the outcome can
+	// stand in for it: Stale means the old set is still usable but was not
+	// refreshed, and Recovering means a question was asked that may never be
+	// answered. Both of those settle the badge to synced, which is why a number
+	// could go six days without reading a label while reporting itself fine.
+	OK []string
 	// Recovering names the collections whose plaintext copy was requested. The
 	// data arrives asynchronously, so this is a "check back shortly", not an
 	// error.

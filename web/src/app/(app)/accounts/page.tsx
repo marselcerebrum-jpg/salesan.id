@@ -16,6 +16,8 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 
+import { LabelHealthNotice } from '@/components/accounts/LabelHealthNotice';
+
 import { AccountCard } from '@/components/accounts/AccountCard';
 import { AccountDetailModal } from '@/components/accounts/AccountDetailModal';
 import { AddAccountModal } from '@/components/accounts/AddAccountModal';
@@ -33,7 +35,7 @@ import {
   syncAccount,
 } from '@/lib/api';
 import { useRealtimeEvent } from '@/lib/realtime';
-import type { Account, AccountStats, Application } from '@/lib/types';
+import type { Account, AccountStats, Application, LabelHealthReport } from '@/lib/types';
 
 type Tab = 'all' | 'qr' | 'waba';
 type SortKey = 'terbaru' | 'nama' | 'status';
@@ -80,6 +82,19 @@ export default function AccountsPage() {
   } = useSWR<{ accounts: Account[] }>(accountsKey, fetcher, { keepPreviousData: true });
 
   const { data: stats, mutate: mutateStats } = useSWR<AccountStats>('/accounts/stats', fetcher);
+
+  /*
+   * Polled, and deliberately often.
+   *
+   * The reconciler re-reads each account every ten minutes, so a number
+   * that loses its labels is known to the server within that; a minute of
+   * polling means the page agrees with the server before anyone has
+   * finished reading it. The cost is one small query per minute per open
+   * tab, against six days of nobody knowing.
+   */
+  const { data: labelHealth } = useSWR<LabelHealthReport>('/accounts/label-health', fetcher, {
+    refreshInterval: 60_000,
+  });
 
   const accounts = useMemo(() => accountsData?.accounts ?? [], [accountsData]);
 
@@ -301,6 +316,10 @@ export default function AccountsPage() {
           label="Terhubung"
           trailing={<ConnectionIndicator />}
         />
+      </div>
+
+      <div className="mt-4">
+        <LabelHealthNotice report={labelHealth} />
       </div>
 
       <nav className="mt-6 flex gap-6 border-b border-hairline" aria-label="Metode koneksi">

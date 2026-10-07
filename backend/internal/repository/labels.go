@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -491,4 +492,94 @@ func (r *Repo) SetLabelSyncState(ctx context.Context, accountID uuid.UUID, state
 		       labels_synced_at = case when $2 = 'synced' then now() else labels_synced_at end
 		 where id = $1`, accountID, state, detailPtr)
 	return err
+}
+
+// MarkLabelCollectionRead stamps the moment the `regular` app-state collection
+// actually decoded, and clears whatever staleness was recorded before it.
+//
+// Separate from SetLabelSyncState on purpose. That one records what the badge
+// says, and the badge is allowed to say "synced" when the account has merely
+// stopped waiting. This one records what happened.
+func (r *Repo) MarkLabelCollectionRead(ctx context.Context, accountID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		update public.whatsapp_accounts
+		   set labels_read_at     = now(),
+		       labels_stale_since = null,
+		       labels_stale_error = null
+		 where id = $1`, accountID)
+	return err
+}
+
+// MarkLabelCollectionStale records that the collection could not be read.
+//
+// `labels_stale_since` is set once and then left alone, so it answers "since
+// when" rather than "most recently" — the difference between a number that
+// blinked and one that has been blind for six days.
+func (r *Repo) MarkLabelCollectionStale(ctx context.Context, accountID uuid.UUID, reason string) error {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	_, err := r.pool.Exec(ctx, `
+		update public.whatsapp_accounts
+		   set labels_stale_since = coalesce(labels_stale_since, now()),
+		       labels_stale_error = $2
+		 where id = $1`, accountID, reasonPtr)
+	return err
+}
+
+// labelStaleAfter is how long a number may go without reading its labels before
+// it is worth a human's attention.
+//
+// The reconciler runs every ten minutes, so an hour is six consecutive misses:
+// long enough that a phone which was merely asleep has had its chance, short
+// enough that nobody discovers the problem a week later by asking a question
+// about something else.
+const labelStaleAfter = time.Hour
+
+// LabelHealth answers, for every connected number, whether its labels are
+// actually readable — and ranks the ones that are not.
+func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models.LabelHealth, error) {
+	rows, err := r.pool.Query(ctx, `
+		select a.id, a.name, a.label, a.phone_number, ap.name,
+		       a.status::text, a.labels_read_at, a.labels_stale_since,
+		       a.labels_stale_error,
+		       (select count(*) from public.conversation_labels l where l.account_id = a.id)
+		  from public.whatsapp_accounts a
+		  left join public.applications ap on ap.id = a.application_id
+		 where a.workspace_id = $1
+		 order by a.labels_stale_since asc nulls last, ap.name, a.label`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]models.LabelHealth, 0, 40)
+	for rows.Next() {
+		var h models.LabelHealth
+		if err := rows.Scan(&h.AccountID, &h.Name, &h.Label, &h.PhoneNumber,
+			&h.ApplicationName, &h.Status, &h.ReadAt, &h.StaleSince,
+			&h.Reason, &h.LabelCount); err != nil {
+			return nil, err
+		}
+
+		// Severity is decided here rather than in the browser so every caller
+		// agrees — the warning banner, an alert, and anyone reading the JSON.
+		h.Severity = "sehat"
+		if h.StaleSince != nil {
+			stale := time.Since(*h.StaleSince)
+			h.StaleHours = math.Round(stale.Hours()*10) / 10
+			switch {
+			// Never read at all is its own thing, and the worst of them: the
+			// number is not behind on its labels, it has none. Two numbers sat
+			// like this for days while reporting themselves synced.
+			case h.ReadAt == nil:
+				h.Severity = "buta"
+			case stale >= labelStaleAfter:
+				h.Severity = "tertinggal"
+			}
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }

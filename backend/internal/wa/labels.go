@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -753,6 +754,12 @@ func (s *Session) reconcileLabels(ctx context.Context, reason string) {
 	// would leave the collection unwritable while it waits on the phone.
 	outcome := s.syncAppState(ctx, false)
 
+	// Record what happened to the collection labels live in, before deciding
+	// what the badge should say about it. These two answer different questions
+	// and the account needs both: the badge is what the operator glances at,
+	// and this is what a health check can be built on without being lied to.
+	s.recordLabelReadability(ctx, outcome)
+
 	switch {
 	case len(outcome.Errors) > 0:
 		detail := errorsJoin(outcome.Errors)
@@ -829,6 +836,44 @@ func (s *Session) reconcileLabels(ctx context.Context, reason string) {
 		_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSynced, "")
 		s.broadcastSyncState(ctx, LabelSyncSynced, "")
 		s.broadcastLabels(ctx, "reconcile:"+reason)
+	}
+}
+
+// recordLabelReadability writes down whether `regular` could be read this pass.
+//
+// Only `regular` is consulted. The other collections carry read state, archive
+// flags and contact names: worth syncing, but a number whose labels are current
+// is not unhealthy because its mute list is behind, and folding them together
+// would put six numbers on a warning list that only three belong on.
+func (s *Session) recordLabelReadability(ctx context.Context, outcome appStateOutcome) {
+	name := string(appstate.WAPatchRegular)
+
+	if slices.Contains(outcome.OK, name) {
+		if err := s.mgr.repo.MarkLabelCollectionRead(ctx, s.AccountID); err != nil {
+			s.log.Warn("could not record that labels were read", "err", err)
+		}
+		return
+	}
+
+	// Stale means the stored set is intact and still usable, which is a real
+	// difference from Recovering or a hard error — but it is still a pass that
+	// did not read anything, and six days of those is what blindness looks like
+	// from the inside.
+	reason := "koleksi label tidak dapat dibaca dari WhatsApp"
+	switch {
+	case len(outcome.Errors) > 0:
+		reason = errorsJoin(outcome.Errors)
+	case slices.Contains(outcome.Recovering, name):
+		reason = "menunggu HP mengirim ulang koleksi label"
+	case slices.Contains(outcome.Stale, name):
+		reason = "koleksi label tidak dapat disegarkan; set lama masih dipakai"
+	default:
+		// `regular` is neither OK nor named anywhere: nothing to say about it.
+		return
+	}
+
+	if err := s.mgr.repo.MarkLabelCollectionStale(ctx, s.AccountID, reason); err != nil {
+		s.log.Warn("could not record that labels went stale", "err", err)
 	}
 }
 

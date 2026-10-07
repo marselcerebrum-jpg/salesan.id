@@ -485,3 +485,33 @@ type AccountFilter struct {
 	ConnectionMethod string
 	Search           string
 }
+
+// LabelHealth is one number's answer to "can this account read its labels right
+// now, and if not, for how long has that been true".
+//
+// Deliberately not folded into Account. Account carries what the badge says,
+// and the badge is permitted to settle to "synced" when the account has merely
+// stopped waiting for a phone that will not answer. This carries what actually
+// happened, which is the only thing a warning can honestly be built on.
+type LabelHealth struct {
+	AccountID       uuid.UUID  `json:"account_id"`
+	Name            string     `json:"name"`
+	Label           *string    `json:"label"`
+	PhoneNumber     *string    `json:"phone_number"`
+	ApplicationName *string    `json:"application_name"`
+	Status          string     `json:"status"`
+	// ReadAt is when the label collection last decoded. Never read is null.
+	ReadAt *time.Time `json:"read_at"`
+	// StaleSince is when the current run of failures began, or null when the
+	// collection is readable.
+	StaleSince *time.Time `json:"stale_since"`
+	// StaleHours is how long that run has lasted, rounded to one decimal.
+	StaleHours float64 `json:"stale_hours"`
+	// Reason is the last failure, as WhatsApp reported it.
+	Reason *string `json:"reason"`
+	// LabelCount is how many labels this number currently holds. Zero on a
+	// number that has never read its collection is the loudest signal here.
+	LabelCount int `json:"label_count"`
+	// Severity is 'sehat', 'tertinggal' or 'buta'.
+	Severity string `json:"severity"`
+}

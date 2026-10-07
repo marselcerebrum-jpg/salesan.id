@@ -374,3 +374,40 @@ func (s *Server) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, result)
 }
+
+// handleLabelHealth reports, per number, whether its labels can actually be
+// read from WhatsApp.
+//
+//	GET /accounts/label-health
+//
+// The account list already carries `label_sync_state`, and that is exactly why
+// this exists separately: that field is what the indicator says, and the
+// indicator is allowed to settle to "synced" when the account has given up
+// waiting for a phone that never answers. For six days it read synced on seven
+// numbers that could not read a label between them, two of which held none at
+// all. Nothing in the product could tell the difference, so nobody did.
+func (s *Server) handleLabelHealth(w http.ResponseWriter, r *http.Request) {
+	user := userFrom(r.Context())
+	rows, err := s.repo.LabelHealth(r.Context(), user.WorkspaceID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	var blind, stale int
+	for _, h := range rows {
+		switch h.Severity {
+		case "buta":
+			blind++
+		case "tertinggal":
+			stale++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"accounts":    rows,
+		"blind":       blind,
+		"stale":       stale,
+		"needs_phone": blind + stale,
+	})
+}
