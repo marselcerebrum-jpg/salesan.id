@@ -280,14 +280,21 @@ export function MediaComposer({
         {/* A textarea, not an input.
             An <input> cannot hold a newline at all, so Enter in it had nowhere
             to go — the caption was one unbroken line however it was written,
-            and a price list or an opening greeting arrived as a wall. Nothing
-            here sends on Enter, so the key does the one thing left for it to
-            do, and the box grows to show the result. */}
+            and a price list or an opening greeting arrived as a wall.
+            Enter still sends, as it does in the thread's own box; Shift+Enter
+            is what reaches the next line. One rule for every box here, because
+            two would mean guessing which one is under the cursor. */}
         <textarea
           ref={captionRef}
           id="media-caption"
           value={current.caption}
           onChange={(event) => patch(current.token, { caption: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.shiftKey) return;
+            event.preventDefault();
+            if (sending || pending.length === 0) return;
+            void run(failed.length > 0 ? failed : pending);
+          }}
           disabled={sending || current.status === 'sent'}
           placeholder="Tambahkan keterangan"
           maxLength={1024}

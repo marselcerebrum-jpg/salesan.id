@@ -41,27 +41,6 @@ interface MediaViewerProps {
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4];
 
 /**
- * Starts a video, giving up its sound rather than its playback.
- *
- * Called from `canplay` rather than once on mount: at mount there is no media
- * to start, and the element has no idea yet whether it can. A second call after
- * the viewer has been paused by hand is harmless, because a paused video that
- * is already past its first frame is left alone.
- */
-function startPlayback(el: HTMLVideoElement) {
-  if (el.currentTime > 0) return; // the operator has already been here
-  void el.play().catch((err: unknown) => {
-    const name = err instanceof Error ? err.name : '';
-    if (name !== 'NotAllowedError') return; // a real failure; the controls say so
-    el.muted = true;
-    void el.play().catch(() => {
-      // Refused even muted. Nothing further to try, and the play button is
-      // right there — which is the correct place to leave it.
-    });
-  });
-}
-
-/**
  * Full-screen viewer for images and video.
  *
  * The image is drawn at its natural size and scaled by a factor computed from
@@ -356,19 +335,17 @@ export function MediaViewer({
             src={url}
             controls
             playsInline
-            // Not `autoPlay`. Chrome refuses to start an unmuted video unless
-            // the page has earned it, and the refusal is silent: the frame
-            // loads, the controls appear, the duration is right, and it sits at
-            // 0:00. The browser says so only if asked —
-            //   NotAllowedError: play() failed because the user didn't
-            //   interact with the document first
-            // — which is indistinguishable, on screen, from a broken file.
+            // Deliberately not started here, and not `autoPlay` either.
             //
-            // So the start is attempted here instead, and when sound is what
-            // the refusal is about, it starts again muted. Sound where the
-            // browser allows it, motion always, and never a still frame that
-            // looks like a fault.
-            onCanPlay={(event) => startPlayback(event.currentTarget)}
+            // Chrome will not start an unmuted video the page has not earned,
+            // so an autoplay attempt only ever succeeds muted — and a playing
+            // video hides the browser's own controls after a moment, the way
+            // every player does. The result was a clip running silently with no
+            // way to reach play, sound or fullscreen without hunting for them.
+            //
+            // Paused is the better starting point: the controls stay put, and
+            // the press on play is itself the gesture that lets the sound
+            // through. One action buys both.
             className="max-h-full max-w-full rounded-md"
           />
         ) : url ? (
