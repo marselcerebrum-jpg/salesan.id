@@ -32,6 +32,8 @@ import {
   updateCampaign,
   type CampaignDraft,
 } from '@/lib/api';
+import { mediaKindFromURL } from '@/lib/media';
+
 import type { ComposerMode } from '@/components/campaign/ComposerPage';
 import type { Account, Recurrence } from '@/lib/types';
 
@@ -461,7 +463,12 @@ export function StoryComposerPage({
           <aside className="w-full shrink-0 xl:sticky xl:top-6 xl:w-[420px]">
             <StoryPreview
               body={caption}
-              mediaKind={kind === 'media' ? 'image' : null}
+              // Guessed from the link, not assumed. Hardcoding 'image' here is
+              // what handed a video URL to an <img> tag: nothing to load and no
+              // play button, under a tab that offers "Gambar / Video". Where the
+              // link carries no extension the guess is null and the frame finds
+              // out by trying, which is better than a confident wrong answer.
+              mediaKind={kind === 'media' ? (mediaKindFromURL(mediaURL) ?? 'image') : null}
               mediaURL={kind === 'media' ? mediaURL : ''}
               senderName={chosen[0]?.label ?? chosen[0]?.name ?? null}
               background={kind === 'text' ? colour.hex : null}

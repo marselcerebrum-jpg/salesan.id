@@ -61,6 +61,13 @@ export function StoryPreview({
   // leaving "tidak dapat dimuat" under a link that is now fine.
   const [brokenURL, setBrokenURL] = useState<string | null>(null);
 
+  // A link whose extension says nothing arrives here as "image", because that
+  // is the commoner case and something has to be drawn first. When it fails,
+  // the honest next question is whether it was a video all along rather than a
+  // broken link, so the frame asks it once before giving up. Keyed by URL for
+  // the same reason as brokenURL: editing the link starts the question over.
+  const [retryAsVideo, setRetryAsVideo] = useState<string | null>(null);
+
   const rendered = renderTemplate(body, seed, variables, values);
   const hasSpintax = /\{[^{}]*\|[^{}]*\}/.test(stripVars(body));
   const url = mediaURL.trim();
@@ -69,7 +76,9 @@ export function StoryPreview({
   // still offers the kind, so the frame says so rather than drawing an empty
   // screen the author would read as "fine".
   const isDocument = mediaKind === 'document';
-  const hasMedia = !isDocument && Boolean(url) && (mediaKind === 'image' || mediaKind === 'video');
+  const shown: MediaKind | null =
+    mediaKind === 'image' && retryAsVideo === url ? 'video' : mediaKind;
+  const hasMedia = !isDocument && Boolean(url) && (shown === 'image' || shown === 'video');
 
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface-raised shadow-e1">
@@ -123,11 +132,11 @@ export function StoryPreview({
             />
           ) : broken ? (
             <Note
-              icon={mediaKind === 'video' ? VideoOff : ImageOff}
-              label={mediaKind === 'video' ? 'Video tidak dapat dimuat' : 'Gambar tidak dapat dimuat'}
+              icon={shown === 'video' ? VideoOff : ImageOff}
+              label={shown === 'video' ? 'Video tidak dapat dimuat' : 'Gambar tidak dapat dimuat'}
               detail={fileNameOf(url)}
             />
-          ) : mediaKind === 'image' && url ? (
+          ) : shown === 'image' && url ? (
             // object-contain, not cover. A Story is letterboxed by WhatsApp when
             // the picture is not 9:16, and cropping it here would hide exactly
             // the part the author needs to see is going to be cut.
@@ -135,10 +144,10 @@ export function StoryPreview({
             <img
               src={url}
               alt=""
-              onError={() => setBrokenURL(url)}
+              onError={() => setRetryAsVideo(url)}
               className="absolute inset-0 size-full object-contain"
             />
-          ) : mediaKind === 'video' && url ? (
+          ) : shown === 'video' && url ? (
             <video
               src={url}
               controls

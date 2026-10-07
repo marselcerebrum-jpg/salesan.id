@@ -271,3 +271,31 @@ export function cacheLink(attachmentId: string, url: string, expiresAt: string):
 export function forgetLink(attachmentId: string): void {
   linkCache.delete(attachmentId);
 }
+
+/**
+ * Guesses whether a pasted link points at a picture or a video.
+ *
+ * The Story composer takes a URL rather than a file, so nothing has been read
+ * when the preview has to draw it. Before this it simply declared every link an
+ * image, which meant a video URL was handed to an `<img>` tag: the frame could
+ * never load it and never offered a play button, on a composer whose own tab
+ * reads "Gambar / Video".
+ *
+ * Returns null when the link carries no extension worth trusting — a CDN or
+ * signed URL often does not. The preview treats that as "find out by trying"
+ * rather than guessing, because a wrong guess here shows the wrong failure
+ * message for the wrong reason.
+ */
+export function mediaKindFromURL(url: string): 'image' | 'video' | null {
+  // Query and fragment first: a signed link ends in a token, not a file name.
+  const path = url.trim().split(/[?#]/)[0];
+  const name = path.split('/').pop() ?? '';
+  if (!name.includes('.')) return null;
+
+  const ext = (name.split('.').pop() ?? '').toLowerCase();
+  if (['mp4', 'mov', 'm4v', '3gp', '3gpp', 'webm', 'mkv', 'avi'].includes(ext)) return 'video';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'avif'].includes(ext)) {
+    return 'image';
+  }
+  return null;
+}
