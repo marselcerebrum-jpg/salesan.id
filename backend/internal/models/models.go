@@ -360,6 +360,11 @@ type Message struct {
 	// MentionSeenAt is when the mention was actually looked at. Distinct from
 	// ReadAt: a busy group can be read through without the mention being seen.
 	MentionSeenAt *time.Time `json:"mention_seen_at"`
+	// PinnedUntil is when this message stops being pinned in its chat, or
+	// null when it is not pinned. WhatsApp pins for a span rather than for
+	// ever, so a boolean here would start lying the moment the span ran out
+	// with nobody around to rewrite it.
+	PinnedUntil *time.Time `json:"pinned_until"`
 
 	// Attachments is empty for text messages. It is never null in JSON so the
 	// frontend can map over it without a guard.

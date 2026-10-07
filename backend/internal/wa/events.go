@@ -309,6 +309,8 @@ const (
 	routeRevoke messageRoute = "revoke"
 	// routeReaction attaches an emoji to a message already in the thread.
 	routeReaction messageRoute = "reaction"
+	// routePin points the chat at a message already in the thread.
+	routePin messageRoute = "pin"
 )
 
 // routeMessage decides what kind of event this is.
@@ -326,6 +328,12 @@ func routeMessage(msg *waE2E.Message, isEdit bool) messageRoute {
 	// it as a row turns every thumbs-up in a busy group into its own bubble.
 	if msg.GetReactionMessage() != nil {
 		return routeReaction
+	}
+	// A pin points the chat at a message rather than adding one. Stored as a
+	// row it would be an empty bubble every time anybody pinned anything, and
+	// the message it points at would still not be marked.
+	if msg.GetPinInChatMessage() != nil {
+		return routePin
 	}
 	// Edits and deletions change a message already in the thread. They arrive
 	// as protocol messages, which extractContent skips, so they have to be
@@ -357,6 +365,8 @@ func (s *Session) handleMessage(evt *events.Message) {
 		s.handleMessageRevoke(ctx, evt)
 	case routeReaction:
 		s.handleReaction(ctx, evt)
+	case routePin:
+		s.applyPinFromPhone(ctx, evt.Message.GetPinInChatMessage(), evt.Info.Chat.ToNonAD().String())
 	default:
 		if _, err := s.persistMessage(ctx, evt, ""); err != nil {
 			s.log.Error("persist incoming message", "wa_id", evt.Info.ID, "err", err)

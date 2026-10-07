@@ -8,6 +8,7 @@ import {
   Loader2,
   MessagesSquare,
   MoreVertical,
+  Pin,
   SendHorizontal,
   Tag,
   UserMinus,
@@ -44,11 +45,12 @@ import {
   initials,
   jidToDisplay,
 } from '@/lib/format';
-import { filesFromClipboard, nameClipboardFile } from '@/lib/media';
+import { filesFromClipboard, KIND_LABEL, nameClipboardFile } from '@/lib/media';
 import { fetcher, markQuickReplyUsed, updateGroupMember } from '@/lib/api';
 import type { GroupMemberAction } from '@/lib/api';
 import type {
   Attachment,
+  AttachmentKind,
   Conversation,
   GroupMember,
   Message,
@@ -100,6 +102,7 @@ interface MessageThreadProps {
   onEditMessage: (message: Message, text: string) => Promise<void>;
   /** Deletes a message for everyone, or from this inbox only. */
   onDeleteMessage: (message: Message, scope: 'everyone' | 'me') => Promise<void>;
+  onPinMessage: (message: Message, pinned: boolean) => Promise<void>;
   /** Adds or clears a reaction; an empty emoji takes this account's back. */
   onReactMessage: (message: Message, emoji: string) => Promise<void>;
   /** Where the unread run begins, and how many messages it covers. */
@@ -141,6 +144,7 @@ export function MessageThread({
   onSendFile,
   onEditMessage,
   onDeleteMessage,
+  onPinMessage,
   onReactMessage,
   unreadMark,
   mentionAnchor,
@@ -206,6 +210,27 @@ export function MessageThread({
     () => new Set(messages.map((m) => m.id)),
     [messages],
   );
+
+  /**
+   * The pinned message, if the thread is holding it.
+   *
+   * Read from the loaded messages rather than fetched: the banner is only
+   * useful when it can be jumped to, and a pin naming something older than the
+   * fifty on screen has nowhere to send anyone. Newest pin wins, because
+   * WhatsApp Business allows several and this banner has room for one.
+   */
+  const pinned = useMemo(() => {
+    const now = Date.now();
+    return (
+      messages
+        .filter((m) => m.pinned_until && new Date(m.pinned_until).getTime() > now && !m.revoked_at)
+        .sort(
+          (a, b) =>
+            new Date(b.pinned_until as string).getTime() -
+            new Date(a.pinned_until as string).getTime(),
+        )[0] ?? null
+    );
+  }, [messages]);
 
   const jumpToMessage = useCallback((messageId: string) => {
     const node = mentionRefs.current.get(messageId);
@@ -453,6 +478,23 @@ export function MessageThread({
       case 'edit':
         setEditingId(message.id);
         break;
+      case 'pin':
+        // Confirmed, unlike reply or forward, because WhatsApp has no private
+        // pin: this points the whole chat at the message, customer included,
+        // and in a group it says who did it. That is not what the word "pin"
+        // suggests, so it is said before rather than discovered after.
+        confirm.ask({
+          title: 'Sematkan pesan ini?',
+          description:
+            'Pesan akan tampil di bagian atas percakapan untuk semua orang di chat ini, ' +
+            'termasuk lawan bicara. Sematan berlaku 30 hari dan bisa dilepas kapan saja.',
+          confirmLabel: 'Sematkan',
+          onConfirm: () => onPinMessage(message, true),
+        });
+        break;
+      case 'unpin':
+        void onPinMessage(message, false);
+        break;
       case 'delete-everyone':
         // Confirmed because it is not undoable and it reaches the other
         // person's phone — the one action here with consequences outside
@@ -691,6 +733,28 @@ export function MessageThread({
           </button>
         ) : null}
       </header>
+
+      {/* The pinned message, under the header and above the thread.
+          Pressing it jumps to the message, which is the whole point of a pin:
+          it says "this one", and a banner that says it without being able to
+          take you there is a label rather than a pointer. The same jump the
+          reply quotes use, so there is one behaviour to learn. */}
+      {pinned ? (
+        <button
+          type="button"
+          onClick={() => jumpToMessage(pinned.id)}
+          title="Lihat pesan yang disematkan"
+          className="flex w-full items-center gap-2 border-b border-wa-border bg-wa-panel px-4 py-2 text-left transition-colors hover:bg-wa-active"
+        >
+          <Pin className="size-3.5 shrink-0 text-wa-text-2" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block text-2xs font-medium text-wa-accent">Pesan disematkan</span>
+            <span className="block truncate text-xs text-wa-text-2">
+              {pinned.body || pinned.caption || KIND_LABEL[pinned.type as AttachmentKind] || 'Pesan'}
+            </span>
+          </span>
+        </button>
+      ) : null}
 
       {/* Bubbles run to the edges of the panel rather than sitting in a
           centred column. On a wide screen the centred version left a narrow

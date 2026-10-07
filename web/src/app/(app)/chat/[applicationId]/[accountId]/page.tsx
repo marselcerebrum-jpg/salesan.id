@@ -43,6 +43,7 @@ import {
   createPoll,
   deleteConversation,
   deleteMessage,
+  pinMessage,
   editMessage,
   fetcher,
   forwardMessage,
@@ -711,6 +712,26 @@ function Inbox() {
    * Deletes a message. "everyone" reaches the other party's phone and leaves a
    * placeholder on both sides; "me" removes it from this inbox only.
    */
+  /**
+   * Pins a message in its chat, or takes the pin off.
+   *
+   * The reply comes back carrying the message with its new state, so the thread
+   * is patched from that rather than reloaded: a pin changes one row, and
+   * refetching fifty to learn it would scroll the operator away from whatever
+   * they were reading.
+   */
+  async function handlePinMessage(message: Message, pinned: boolean) {
+    setError(null);
+    try {
+      const { message: updated } = await pinMessage(message.id, pinned);
+      setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Sematan gagal diubah di WhatsApp.',
+      );
+    }
+  }
+
   async function handleDeleteMessage(message: Message, scope: 'everyone' | 'me') {
     setError(null);
     try {
@@ -1117,6 +1138,7 @@ function Inbox() {
           onSendFile={handleSendFile}
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
+          onPinMessage={handlePinMessage}
           onReactMessage={handleReactMessage}
           unreadMark={unreadMark}
           mentionAnchor={mentionAnchor}
@@ -1157,6 +1179,7 @@ function Inbox() {
                 onSendFile={handleSendFile}
                 onEditMessage={handleEditMessage}
                 onDeleteMessage={handleDeleteMessage}
+                onPinMessage={handlePinMessage}
                 onReactMessage={handleReactMessage}
                 unreadMark={unreadMark}
                 mentionAnchor={mentionAnchor}

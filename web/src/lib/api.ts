@@ -2164,3 +2164,15 @@ export const resetLabelCollection = (id: string) =>
   request<{ reset: boolean; detail: string }>(`/accounts/${id}/reset-labels`, {
     method: 'POST',
   });
+
+/**
+ * Pins a message in its chat, or takes the pin off.
+ *
+ * Pin-for-everyone is the only kind WhatsApp has, so the customer sees it too
+ * and in a group everyone sees who did it. Nothing here is a private bookmark.
+ */
+export const pinMessage = (id: string, pinned: boolean) =>
+  request<{ message: Message }>(`/messages/${id}/pin`, {
+    method: 'POST',
+    body: JSON.stringify({ pinned }),
+  });

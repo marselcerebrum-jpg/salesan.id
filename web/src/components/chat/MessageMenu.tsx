@@ -7,6 +7,8 @@ import {
   CornerUpLeft,
   MessageCircle,
   Pencil,
+  Pin,
+  PinOff,
   Share2,
   ShieldMinus,
   ShieldPlus,
@@ -29,6 +31,8 @@ export type MessageAction =
   | 'delete-everyone'
   | 'delete-me'
   | 'copy'
+  | 'pin'
+  | 'unpin'
   | 'promote'
   | 'demote'
   | 'kick';
@@ -109,6 +113,11 @@ export function MessageMenu({
 
   // A deleted message has nothing left to act on but its own removal.
   const revoked = Boolean(message.revoked_at);
+  // Read from the message rather than passed in, so the menu and the banner
+  // above the thread can never disagree about whether this one is pinned.
+  const pinned = Boolean(
+    message.pinned_until && new Date(message.pinned_until).getTime() > Date.now(),
+  );
   const text = message.body ?? message.caption ?? '';
   const withinEditWindow = Date.now() - new Date(message.timestamp).getTime() < EDIT_WINDOW_MS;
   const editable =
@@ -128,6 +137,17 @@ export function MessageMenu({
   }
   if (!revoked && hasContent) items.push({ action: 'forward', label: 'Teruskan', icon: Share2 });
   if (text && !revoked) items.push({ action: 'copy', label: 'Salin teks', icon: Copy });
+  // Pinning is for everyone in the chat — WhatsApp offers no private kind — so
+  // a deleted message is the one thing it must not be offered on: pointing the
+  // whole chat at a bubble that reads "Pesan ini dihapus" is a worse outcome
+  // than no pin at all.
+  if (!revoked) {
+    items.push(
+      pinned
+        ? { action: 'unpin', label: 'Lepas sematan', icon: PinOff }
+        : { action: 'pin', label: 'Sematkan pesan', icon: Pin },
+    );
+  }
   if (editable) items.push({ action: 'edit', label: 'Edit pesan', icon: Pencil });
   items.push({ action: 'delete-me', label: 'Hapus untuk saya', icon: UserMinus });
   // Own messages anywhere; anyone's message in a group we administer — the

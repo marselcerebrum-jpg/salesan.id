@@ -200,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/private-reply", s.handlePrivateReplyTarget)
 				r.Post("/private-reply", s.handlePrivateReply)
 				r.Post("/react", s.handleReactToMessage)
+				r.Post("/pin", s.handlePinMessage)
 				r.Post("/vote", s.handleVotePoll)
 			})
 

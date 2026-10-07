@@ -387,6 +387,14 @@ export interface Message {
   mentions_me: boolean;
   /** When the mention was looked at; distinct from read_at. */
   mention_seen_at: string | null;
+  /**
+   * When this message stops being pinned in its chat, or null when it is not.
+   *
+   * A span rather than a flag because that is what WhatsApp pins are: a boolean
+   * would start lying the moment the span ran out with nobody around to rewrite
+   * it, so the expiry is compared against the clock wherever it is read.
+   */
+  pinned_until: string | null;
   /** Empty for text messages; never null. */
   attachments: Attachment[];
   /** Set only on poll messages. */

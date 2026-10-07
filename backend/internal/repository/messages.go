@@ -19,7 +19,7 @@ const messageColumns = `
 	m.quoted_message_id, m.status::text, m.error_message, m.delivered_at, m.read_at,
 	m.edited_at, m.revoked_at, m.timestamp, m.created_at, m.sent_by,
 	m.participant_jid, m.sender_phone, coalesce(m.mentioned_jids, '{}'), m.mentions_me,
-	m.mention_seen_at`
+	m.mention_seen_at, m.pinned_until`
 
 // senderIdentity resolves who wrote a message, joined at read time rather than
 // frozen into the row.
@@ -64,7 +64,7 @@ func messageDest(m *models.Message) []any {
 		&m.QuotedMessageID, &m.Status, &m.ErrorMessage, &m.DeliveredAt, &m.ReadAt,
 		&m.EditedAt, &m.RevokedAt, &m.Timestamp, &m.CreatedAt, &m.SentBy,
 		&m.ParticipantJID, &m.SenderPhone, &m.MentionedJIDs, &m.MentionsMe,
-		&m.MentionSeenAt,
+		&m.MentionSeenAt, &m.PinnedUntil,
 	}
 }
 
@@ -1040,4 +1040,44 @@ func (r *Repo) LatestMessageTime(ctx context.Context, accountID uuid.UUID) (*tim
 		return nil, err
 	}
 	return ts, nil
+}
+
+// SetMessagePinned records a pin, or clears one.
+//
+// Both timestamps move together and both may be null: a message that is not
+// pinned has neither a moment it was pinned nor a moment the pin runs out, and
+// leaving one behind would make "is this pinned" answerable two different ways.
+func (r *Repo) SetMessagePinned(ctx context.Context, messageID uuid.UUID, at, until *time.Time) error {
+	tag, err := r.pool.Exec(ctx, `
+		update public.messages
+		   set pinned_at = $2, pinned_until = $3
+		 where id = $1`, messageID, at, until)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// PinnedMessage returns the message currently pinned in a conversation.
+//
+// Newest pin wins where there is more than one. WhatsApp allows several on
+// business accounts, and the banner has room for one, so the one it shows is
+// the one most recently put there rather than whichever the index happened to
+// reach first.
+func (r *Repo) PinnedMessage(ctx context.Context, workspaceID, conversationID uuid.UUID) (*models.Message, error) {
+	q := "select " + messageColumns + `
+		  from public.messages m
+		 where m.conversation_id = $1 and m.workspace_id = $2
+		   and m.pinned_until is not null and m.pinned_until > now()
+		   and m.revoked_at is null
+		 order by m.pinned_at desc nulls last
+		 limit 1`
+	m, err := scanMessage(r.pool.QueryRow(ctx, q, conversationID, workspaceID))
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return m, nil
 }
