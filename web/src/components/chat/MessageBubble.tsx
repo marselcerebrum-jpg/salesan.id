@@ -528,7 +528,17 @@ function EditBox({
   }
 
   return (
-    <div className="w-full min-w-[min(420px,70vw)]">
+    // While the editor is open the bubble has no text of its own to size
+    // itself by, so this floor is what decides the width. One figure for every
+    // message would be wrong in both directions: a promo message wants the room
+    // the bubble now allows, and a three-word correction opened at that width
+    // is a dialog box pretending to be a chat bubble.
+    <div
+      className={clsx(
+        'w-full',
+        initial.length > 280 ? 'min-w-[min(640px,88vw)]' : 'min-w-[min(320px,80vw)]',
+      )}
+    >
       <textarea
         ref={box}
         autoFocus
