@@ -43,11 +43,29 @@ export function LabelHealthNotice({
         {report.needs_phone} nomor tidak bisa membaca label dari HP
       </h2>
 
-      <p className="mt-1 text-xs text-ink-soft">
-        WhatsApp menolak memberikan koleksi labelnya, dan hanya HP-nya yang bisa
-        memulihkan. Buka WhatsApp di nomor berikut, biarkan terbuka, lalu tekan
-        Sinkron.
-      </p>
+      {/* Two situations, two instructions, and giving the wrong one costs real
+          time. A number that is merely behind is waiting on a phone, and opening
+          WhatsApp there is the whole fix. A number that has never read its
+          collection is not waiting on anything: two of these were unlinked and
+          re-paired from a clean QR and failed again at the identical patch, so
+          the broken data is in WhatsApp's record and no amount of Sinkron
+          reaches it. Telling someone to keep pressing it would be sending them
+          back to a door that is already known to be locked. */}
+      {report.stale > 0 ? (
+        <p className="mt-1 text-xs text-ink-soft">
+          <strong className="text-ink">Tertinggal</strong> — buka WhatsApp di HP nomor
+          itu, biarkan terbuka, lalu tekan Sinkron.
+        </p>
+      ) : null}
+
+      {report.blind > 0 ? (
+        <p className="mt-1 text-xs text-ink-soft">
+          <strong className="text-ink">Belum pernah terbaca</strong> — koleksi labelnya
+          rusak di sisi WhatsApp. Memasang ulang nomornya tidak menolong; yang sudah
+          di-scan ulang pun gagal lagi di titik yang sama. Yang menyelesaikan hanya
+          membangun ulang koleksinya.
+        </p>
+      ) : null}
 
       <ul className="mt-3 space-y-1.5">
         {hurt.map((a) => (
