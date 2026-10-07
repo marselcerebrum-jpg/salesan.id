@@ -31,6 +31,7 @@ import { ForwardDialog } from '@/components/chat/ForwardDialog';
 import { GroupPanel } from '@/components/chat/GroupPanel';
 import { MediaViewer } from '@/components/chat/MediaViewer';
 import { useAutoGrow } from '@/components/chat/autogrow';
+import { applyListBreak } from '@/components/chat/listcontinue';
 import { DaySeparator, MessageBubble } from '@/components/chat/MessageBubble';
 import type { MessageAction } from '@/components/chat/MessageMenu';
 import { PollComposer } from '@/components/chat/PollComposer';
@@ -1021,9 +1022,17 @@ export function MessageThread({
             onKeyDown={(event) => {
               // The slash menu owns the arrows and Enter while it is open; it
               // listens in the capture phase, so nothing reaches here.
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.key !== 'Enter') return;
+              if (!event.shiftKey) {
                 event.preventDefault();
                 send();
+                return;
+              }
+              // Shift+Enter breaks the line, and a line inside a list takes
+              // its marker with it. Only when there is one to take: otherwise
+              // the browser inserts the newline as it always did.
+              if (applyListBreak(event.currentTarget, draft, setDraft)) {
+                event.preventDefault();
               }
             }}
             onPaste={(event) => {

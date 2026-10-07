@@ -26,6 +26,7 @@ import {
 } from 'react';
 
 import { useAutoGrow } from '@/components/chat/autogrow';
+import { applyListBreak } from '@/components/chat/listcontinue';
 import { ImageEditor } from '@/components/chat/ImageEditor';
 import { formatBytes, KIND_LABEL, kindOfFile, validateFile } from '@/lib/media';
 import type { AttachmentKind } from '@/lib/types';
@@ -113,6 +114,7 @@ export function MediaComposer({
 
   // Read through a ref so the key handler is bound once per opening rather
   // than re-bound on every keystroke in the caption field.
+  const runningRef = useRef(false);
   const captionRef = useRef<HTMLTextAreaElement>(null);
   // Keyed on the caption of whichever file is open, so switching between two
   // attached files resizes the box to the one now in front of the operator.
@@ -165,7 +167,15 @@ export function MediaComposer({
    */
   const run = useCallback(
     async (queue: Draft[]) => {
-      if (queue.length === 0 || sending) return;
+      // A ref, not the `sending` state, and the difference is the whole guard.
+      //
+      // setSending(true) does not take effect until React renders, and two
+      // Enter presses can arrive inside one tick — a held key repeats faster
+      // than that. Both would read `sending` as false, both would start, and
+      // the customer would receive the picture twice. The ref changes on the
+      // line it is written.
+      if (queue.length === 0 || runningRef.current) return;
+      runningRef.current = true;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -208,13 +218,17 @@ export function MediaComposer({
       }
 
       abortRef.current = null;
+      runningRef.current = false;
       setSending(false);
 
       // Close only when everything landed; a partial failure keeps the screen
       // open so the operator can see which file needs another go.
       if (allDelivered) state.current.onClose();
     },
-    [onSendFile, patch, sending],
+    // `sending` is gone from here on purpose: the guard above reads a ref now,
+    // so this closure no longer depends on the rendered value. Keeping it would
+    // rebuild the callback on every send for nothing.
+    [onSendFile, patch],
   );
 
   if (!open || !current) return null;
@@ -290,7 +304,15 @@ export function MediaComposer({
           value={current.caption}
           onChange={(event) => patch(current.token, { caption: event.target.value })}
           onKeyDown={(event) => {
-            if (event.key !== 'Enter' || event.shiftKey) return;
+            if (event.key !== 'Enter') return;
+            if (event.shiftKey) {
+              if (applyListBreak(event.currentTarget, current.caption, (next) =>
+                patch(current.token, { caption: next }),
+              )) {
+                event.preventDefault();
+              }
+              return;
+            }
             event.preventDefault();
             if (sending || pending.length === 0) return;
             void run(failed.length > 0 ? failed : pending);

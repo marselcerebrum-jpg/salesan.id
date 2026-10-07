@@ -21,6 +21,7 @@ import {
 import { useRef, useState, type ComponentType } from 'react';
 
 import { useAutoGrow } from '@/components/chat/autogrow';
+import { applyListBreak } from '@/components/chat/listcontinue';
 import { MediaAttachment } from '@/components/chat/MediaAttachment';
 import { MentionText } from '@/components/chat/MentionText';
 import { MessageMenu, type MessageAction } from '@/components/chat/MessageMenu';
@@ -546,11 +547,16 @@ function EditBox({
         disabled={busy}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
+          if (event.key === 'Escape') onCancel();
+          if (event.key !== 'Enter') return;
+          if (!event.shiftKey) {
             event.preventDefault();
             void save();
+            return;
           }
-          if (event.key === 'Escape') onCancel();
+          if (applyListBreak(event.currentTarget, value, setValue)) {
+            event.preventDefault();
+          }
         }}
         rows={1}
         placeholder={placeholder}
