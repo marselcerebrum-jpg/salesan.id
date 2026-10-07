@@ -35,6 +35,13 @@ const accountFrom = `
 	            count(*) filter (where c.awaiting_reply) as awaiting
 	       from public.conversations c
 	      where c.account_id = a.id and c.is_archived = false
+	        -- Status updates are not chats and the inbox never lists one, but
+	        -- this sum counted them anyway: thirty-three Status rows carried
+	        -- 38,742 unread, nearly half the workspace total, against 535
+	        -- across every personal chat there is. The badge an operator cannot
+	        -- clear by reading everything in front of them is not a badge, and
+	        -- it buried the number they actually needed.
+	        and c.type <> 'status'
 	) cv on true
 	left join lateral (
 	     select count(*) as n from public.messages m where m.account_id = a.id

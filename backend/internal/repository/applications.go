@@ -38,6 +38,10 @@ func (r *Repo) ListApplications(ctx context.Context, sc Scope) ([]models.Applica
 		         join public.whatsapp_accounts w on w.id = c.account_id
 		        where w.application_id = a.id
 		          and c.is_archived = false
+		          -- Excluded for the same reason as on the account rows: the
+		          -- inbox never lists a Status update, so counting one here
+		          -- makes a badge nobody can ever clear.
+		          and c.type <> 'status'
 		  ) conv on true
 		 where a.workspace_id = $1`
 
