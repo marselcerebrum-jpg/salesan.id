@@ -87,6 +87,21 @@ type Session struct {
 	// One account did that eighteen times in ten minutes.
 	appStateForcedAt sync.Map // map[string]time.Time
 
+	// appStateRollback holds the version a forced re-read threw away, so it can
+	// be put back when the phone does not answer.
+	//
+	// Clearing the version is a bet: it buys a chance at a clean snapshot and
+	// pays for it with a collection that can be neither read nor written until
+	// one arrives. The bet is worth making once. Losing it silently and
+	// permanently is not, and that is what happened — three numbers sat with no
+	// stored version at all, two of them showing no labels whatsoever, while the
+	// re-read was attempted every quarter of an hour for days.
+	appStateRollback sync.Map // map[string]appStateSnapshot
+
+	// appStateForceCount is how many forced re-reads of a collection have been
+	// spent on this connection without one landing.
+	appStateForceCount sync.Map // map[string]*atomic.Int32
+
 	// recoveryGates holds an open channel per collection currently being
 	// recovered. Writes to a collection whose local version was cleared are
 	// rejected by the server with `409 conflict`, so writers wait on the gate

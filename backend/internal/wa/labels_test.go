@@ -67,11 +67,61 @@ func TestForcedReReadIsRateLimited(t *testing.T) {
 		t.Error("a different collection must not inherit the refusal")
 	}
 
-	// A successful decode clears the history, because the next wedge is a new
-	// problem rather than a continuation of the old one.
+	// Zeroing the failure run must NOT reopen the floor. The run is zeroed the
+	// moment a forced re-read is sent, so a reset that also forgot the
+	// timestamp meant the floor was never once reached: three more failures,
+	// about half an hour on a wedged collection, and the version was cleared
+	// again. Thirty-three times a day, on numbers whose phone answered none of
+	// them.
 	s.resetAppStateFailures(appstate.WAPatchRegular)
+	if s.mayForceAppState(appstate.WAPatchRegular) {
+		t.Error("zeroing the failure run must not reopen the rate limit")
+	}
+
+	// A successful decode does clear it, because the next wedge is a new
+	// problem rather than a continuation of the old one.
+	s.appStateRecovered(appstate.WAPatchRegular)
 	if !s.mayForceAppState(appstate.WAPatchRegular) {
 		t.Error("after a success the collection may be forced again")
+	}
+}
+
+// Asking is not free: each forced re-read clears the stored version, shuts the
+// write gate, and bills the phone for a full dump. A phone that has ignored
+// three of them will ignore the fourth, so the attempts are budgeted — and once
+// they are spent the account has to say so, because only a person can fix it.
+func TestForcedReReadsAreBudgetedThenHandedToTheOperator(t *testing.T) {
+	s := &Session{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	for i := 1; i <= appStateForceBudget; i++ {
+		if !s.mayForceAppState(appstate.WAPatchRegular) {
+			t.Fatalf("attempt %d of %d must be allowed", i, appStateForceBudget)
+		}
+		if s.appStateForceSpent(appstate.WAPatchRegular) != (i == appStateForceBudget) {
+			t.Errorf("budget reported spent=%v after attempt %d",
+				s.appStateForceSpent(appstate.WAPatchRegular), i)
+		}
+		// Clear the floor so the budget is what refuses, not the clock.
+		s.appStateForcedAt.Delete(string(appstate.WAPatchRegular))
+	}
+
+	if s.mayForceAppState(appstate.WAPatchRegular) {
+		t.Error("a forced re-read past the budget must be refused")
+	}
+	if !s.appStateForceSpent(appstate.WAPatchRegular) {
+		t.Error("the budget must read as spent, which is what turns the badge red")
+	}
+
+	// Another collection keeps its own budget: a wedged `regular` says nothing
+	// about `regular_low`, and on this fleet the two failed independently.
+	if !s.mayForceAppState(appstate.WAPatchRegularLow) {
+		t.Error("a different collection must not inherit the spent budget")
+	}
+
+	// A phone that answers gives the attempts back.
+	s.appStateRecovered(appstate.WAPatchRegular)
+	if s.appStateForceSpent(appstate.WAPatchRegular) {
+		t.Error("a landed snapshot must restore the budget")
 	}
 }
 

@@ -625,15 +625,35 @@ func (s *Session) countAppStateFailure(name appstate.WAPatchName) int {
 	return int(n.Add(1))
 }
 
-// resetAppStateFailures forgets the run, which a collection that decoded
-// successfully has earned.
+// resetAppStateFailures forgets the run of decode failures.
+//
+// It deliberately leaves appStateForcedAt alone. Clearing that here was what
+// made the fifteen-minute floor unreachable: the count is zeroed the moment a
+// forced re-read is sent, so deleting the timestamp in the same breath meant
+// the next three failures — about half an hour on a wedged collection — were
+// enough to clear the version again. The floor only means anything if the
+// thing it is measuring from survives.
+//
+// The timestamp is cleared where it belongs, in appStateRecovered, which runs
+// when a collection actually decodes.
 func (s *Session) resetAppStateFailures(name appstate.WAPatchName) {
 	if v, ok := s.appStateFailures.Load(string(name)); ok {
 		if n, ok := v.(*atomic.Int32); ok {
 			n.Store(0)
 		}
 	}
+}
+
+// appStateRecovered forgets everything this connection learned about a
+// collection failing, which one that has just decoded has earned.
+func (s *Session) appStateRecovered(name appstate.WAPatchName) {
+	s.resetAppStateFailures(name)
 	s.appStateForcedAt.Delete(string(name))
+	if v, ok := s.appStateForceCount.Load(string(name)); ok {
+		if n, ok := v.(*atomic.Int32); ok {
+			n.Store(0)
+		}
+	}
 }
 
 // mayForceAppState reports whether enough time has passed to clear and re-read
@@ -647,6 +667,24 @@ func (s *Session) resetAppStateFailures(name appstate.WAPatchName) {
 // presses Sinkron.
 func (s *Session) mayForceAppState(name appstate.WAPatchName) bool {
 	key := string(name)
+
+	// A phone that has ignored this question several times running is not going
+	// to answer the next one, and the asking is not free: each attempt clears
+	// the stored version, shuts the write gate for ninety seconds, and bills the
+	// phone for a full dump of the collection. Across the fleet it ran at five
+	// hundred requests a day for three answers.
+	//
+	// So the attempts are budgeted. Past the budget the collection is left
+	// exactly as it is — behind, but readable and writable — and the indicator
+	// says so, which is the one thing that gets a human to open the phone.
+	if v, ok := s.appStateForceCount.Load(key); ok {
+		if n, ok := v.(*atomic.Int32); ok && n.Load() >= appStateForceBudget {
+			s.log.Debug("forced re-reads for this collection are spent; waiting for the operator",
+				"patch", name, "spent", n.Load())
+			return false
+		}
+	}
+
 	if last, ok := s.appStateForcedAt.Load(key); ok {
 		if at, _ := last.(time.Time); time.Since(at) < appStateForceBackoff {
 			s.log.Debug("already cleared this collection recently; leaving it to the phone",
@@ -654,9 +692,38 @@ func (s *Session) mayForceAppState(name appstate.WAPatchName) bool {
 			return false
 		}
 	}
+
 	s.appStateForcedAt.Store(key, time.Now())
+	v, _ := s.appStateForceCount.LoadOrStore(key, new(atomic.Int32))
+	if n, ok := v.(*atomic.Int32); ok {
+		n.Add(1)
+	}
 	return true
 }
+
+// appStateForceSpent reports whether this connection has used up its forced
+// re-reads of a collection without one landing.
+func (s *Session) appStateForceSpent(name appstate.WAPatchName) bool {
+	v, ok := s.appStateForceCount.Load(string(name))
+	if !ok {
+		return false
+	}
+	n, ok := v.(*atomic.Int32)
+	return ok && n.Load() >= appStateForceBudget
+}
+
+// appStateForceBudget is how many forced re-reads of one collection this
+// connection will spend before it stops asking.
+//
+// Three, because the evidence says the answer does not change: five hundred and
+// twenty-five requests across the fleet in a day produced three snapshots, none
+// of them for the collection that holds labels. A phone that is going to answer
+// answers within seconds; one that has stayed silent through three full dumps is
+// not being slow, and the fourth attempt only takes the collection apart again.
+//
+// The budget is per connection, so reconnecting an account — or pressing
+// Sinkron, which takes its own path — starts the attempts over.
+const appStateForceBudget = 3
 
 // --- reconciliation ----------------------------------------------------------
 
@@ -717,12 +784,35 @@ func (s *Session) reconcileLabels(ctx context.Context, reason string) {
 			s.labelRecoverySince.Store(time.Now().Unix())
 			break
 		}
-		if waited := time.Since(time.Unix(since, 0)); waited >= labelRecoveryGrace {
-			s.log.Warn("phone has not answered the label recovery; settling the indicator",
-				"reason", reason, "waited", waited.Round(time.Second))
-			_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSynced, "")
-			s.broadcastSyncState(ctx, LabelSyncSynced, "")
+		waited := time.Since(time.Unix(since, 0))
+		if waited < labelRecoveryGrace {
+			break
 		}
+
+		// Past the grace there are two different situations wearing one badge,
+		// and collapsing them is what let this rot for days: thirty-eight
+		// numbers all reading "synced" while seven could not read their labels
+		// at all and two held none whatsoever.
+		//
+		// While attempts remain, settling to synced is honest — the set on
+		// screen is the last one WhatsApp gave us and a refresh is merely
+		// outstanding. Once they are spent, nothing further will happen without
+		// a person, and a badge that says "synced" is the only thing standing
+		// between that person and the thirty seconds it takes to fix.
+		if s.appStateForceSpent(appstate.WAPatchRegular) {
+			const detail = "Label tidak bisa dibaca dari HP. Buka WhatsApp di HP nomor ini, " +
+				"biarkan terbuka, lalu tekan Sinkron."
+			s.log.Warn("forced re-reads spent and the phone has not answered; asking for the operator",
+				"reason", reason, "waited", waited.Round(time.Second))
+			_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncFailed, detail)
+			s.broadcastSyncState(ctx, LabelSyncFailed, detail)
+			break
+		}
+
+		s.log.Warn("phone has not answered the label recovery; settling the indicator",
+			"reason", reason, "waited", waited.Round(time.Second))
+		_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSynced, "")
+		s.broadcastSyncState(ctx, LabelSyncSynced, "")
 
 	case len(outcome.Stale) > 0:
 		// Could not refresh, but the stored state is intact and writable. Say

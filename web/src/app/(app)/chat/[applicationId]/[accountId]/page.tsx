@@ -85,7 +85,15 @@ import type {
  * Label sync indicator. Stays out of the way while idle: a badge that is always
  * on becomes furniture and stops being read.
  */
-function LabelSyncBadge({ state }: { state: LabelSyncState }) {
+/**
+ * `detail` is what the badge is for.
+ *
+ * "Label gagal sinkron" names a state and leaves the operator with nowhere to
+ * go, and the one fix for the common cause takes thirty seconds: open WhatsApp
+ * on that phone and press Sinkron. The backend knows that and says so; without
+ * carrying it here the sentence is written and never read.
+ */
+function LabelSyncBadge({ state, detail }: { state: LabelSyncState; detail?: string | null }) {
   if (state === 'idle') return null;
 
   const tone = {
@@ -96,6 +104,7 @@ function LabelSyncBadge({ state }: { state: LabelSyncState }) {
 
   return (
     <span
+      title={state === 'failed' && detail ? detail : undefined}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-2xs font-medium ${tone.className}`}
     >
       {state === 'syncing' ? (
@@ -201,6 +210,7 @@ function Inbox() {
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [labelSync, setLabelSync] = useState<LabelSyncState>('idle');
+  const [labelSyncDetail, setLabelSyncDetail] = useState<string | null>(null);
   const confirm = useConfirm();
   // Where the "N pesan belum dibaca" divider sits, captured when the thread is
   // opened and held until another thread is opened — as WhatsApp does.
@@ -549,6 +559,7 @@ function Inbox() {
   useRealtimeEvent<LabelSyncStatePayload>('labels.sync_state', (payload) => {
     if (payload.account_id !== accountId) return;
     setLabelSync(payload.state);
+    setLabelSyncDetail(payload.detail ?? null);
     if (payload.state === 'failed' && payload.detail) setError(payload.detail);
   });
 
@@ -986,7 +997,7 @@ function Inbox() {
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <LabelSyncBadge state={labelSync} />
+            <LabelSyncBadge state={labelSync} detail={labelSyncDetail} />
             {syncNote ? <p className="text-2xs text-brand-700">{syncNote}</p> : null}
           </div>
 

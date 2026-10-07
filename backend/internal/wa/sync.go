@@ -478,7 +478,19 @@ func (s *Session) requestAppStateRecovery(ctx context.Context, name appstate.WAP
 		// patches with `409 conflict`.
 		s.markRecovering(name)
 
+		// Remember what is about to be thrown away.
+		//
+		// The clear is only half a repair — the other half is a snapshot the
+		// phone may never send. Without this, the half that always succeeds is
+		// the destructive one, and a collection that was merely stale becomes a
+		// collection with no version at all: unreadable, unwritable, and with
+		// nothing left to put back.
+		if ver, hash, err := s.client.Store.AppState.GetAppStateVersion(ctx, string(name)); err == nil && ver > 0 {
+			s.appStateRollback.Store(string(name), appStateSnapshot{version: ver, hash: hash})
+		}
+
 		if err := s.client.Store.AppState.DeleteAppStateVersion(ctx, string(name)); err != nil {
+			s.appStateRollback.Delete(string(name))
 			s.markRecovered(name)
 			return false, fmt.Errorf("reset stored version: %w", err)
 		}
@@ -486,6 +498,10 @@ func (s *Session) requestAppStateRecovery(ctx context.Context, name appstate.WAP
 
 	if _, err := s.client.SendPeerMessage(ctx, whatsmeow.BuildAppStateRecoveryRequest(name)); err != nil {
 		if force {
+			// Nothing was asked for, so nothing is coming. Put the version back
+			// now rather than waiting out a gate for an answer to a question
+			// that was never sent.
+			s.restoreAppStateVersion(name)
 			s.markRecovered(name)
 		}
 		return false, fmt.Errorf("send recovery request: %w", err)
@@ -504,13 +520,55 @@ func (s *Session) markRecovering(name appstate.WAPatchName) {
 	time.AfterFunc(recoveryGateTTL, func() {
 		if _, still := s.recoveryGates.Load(string(name)); still {
 			s.log.Warn("app state recovery timed out, releasing write gate", "patch", name)
+			// The gate is still shut, so no snapshot arrived. Undo the clear.
+			s.restoreAppStateVersion(name)
 			s.markRecovered(name)
 		}
 	})
 }
 
+// appStateSnapshot is the version a forced re-read cleared, kept until the
+// phone either answers or runs out of time.
+type appStateSnapshot struct {
+	version uint64
+	hash    [128]byte
+}
+
+// restoreAppStateVersion puts back the version a forced re-read threw away.
+//
+// A collection whose version is gone is strictly worse off than one that is
+// merely behind: behind can still be read incrementally and written to, gone
+// can do neither. So when the bet does not pay, the stake comes back. If the
+// phone did answer, handleAppStateSyncComplete has already dropped the entry
+// and this does nothing.
+func (s *Session) restoreAppStateVersion(name appstate.WAPatchName) {
+	raw, ok := s.appStateRollback.LoadAndDelete(string(name))
+	if !ok {
+		return
+	}
+	snap, ok := raw.(appStateSnapshot)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(s.mgr.rootCtx, 10*time.Second)
+	defer cancel()
+	if err := s.client.Store.AppState.PutAppStateVersion(ctx, string(name), snap.version, snap.hash); err != nil {
+		s.log.Warn("could not put the stored app state version back",
+			"patch", name, "version", snap.version, "err", err)
+		return
+	}
+	s.log.Warn("phone did not answer the forced re-read; stored version put back",
+		"patch", name, "version", snap.version)
+}
+
 // markRecovered releases anything waiting for this collection.
+//
+// Reaching here by way of a landed snapshot means the cleared version is the
+// one thing that must NOT come back, so the rollback is dropped. The timeout
+// path puts it back first and finds nothing left to drop.
 func (s *Session) markRecovered(name appstate.WAPatchName) {
+	s.appStateRollback.Delete(string(name))
 	if raw, ok := s.recoveryGates.LoadAndDelete(string(name)); ok {
 		if gate, _ := raw.(chan struct{}); gate != nil {
 			close(gate)
