@@ -18,8 +18,9 @@ import {
   UserRound,
   Video,
 } from 'lucide-react';
-import { useState, type ComponentType } from 'react';
+import { useRef, useState, type ComponentType } from 'react';
 
+import { useAutoGrow } from '@/components/chat/autogrow';
 import { MediaAttachment } from '@/components/chat/MediaAttachment';
 import { MentionText } from '@/components/chat/MentionText';
 import { MessageMenu, type MessageAction } from '@/components/chat/MessageMenu';
@@ -105,6 +106,8 @@ export function MessageBubble({
   canManageMembers = false,
   senderMember = null,
   onReact,
+  onJumpToQuoted,
+  loadedMessageIds,
 }: {
   message: Message;
   showSender: boolean;
@@ -131,6 +134,17 @@ export function MessageBubble({
   senderMember?: { jid: string; isAdmin: boolean } | null;
   /** Adds or clears a reaction; an empty emoji means "take mine back". */
   onReact?: (message: Message, emoji: string) => void;
+  /** Scrolls the thread to the message this one is answering. */
+  onJumpToQuoted?: (messageId: string) => void;
+  /**
+   * Which messages the thread currently holds.
+   *
+   * The thread loads the last fifty, so a reply to something older names a
+   * message that exists in the database and not on screen. Without this the
+   * quote would become a button that scrolls nowhere, which is the one outcome
+   * worth more trouble than no button at all.
+   */
+  loadedMessageIds?: ReadonlySet<string>;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const mine = message.from_me;
@@ -264,7 +278,12 @@ export function MessageBubble({
         ) : null}
 
         {message.quoted && !revoked ? (
-          <QuotedPreview quoted={message.quoted} mine={mine} />
+          <QuotedPreview
+            quoted={message.quoted}
+            mine={mine}
+            onJump={onJumpToQuoted}
+            loaded={loadedMessageIds}
+          />
         ) : null}
 
         {/* Negative margins pull the media out to the bubble's edge, which is
@@ -366,7 +385,19 @@ export function MessageBubble({
  * quote is deliberately small: it is there to say what is being answered, not
  * to repeat the message.
  */
-function QuotedPreview({ quoted, mine }: { quoted: QuotedMessage; mine: boolean }) {
+function QuotedPreview({
+  quoted,
+  mine,
+  onJump,
+  loaded,
+}: {
+  quoted: QuotedMessage;
+  mine: boolean;
+  /** Scrolls the thread to the message being answered. */
+  onJump?: (messageId: string) => void;
+  /** The ids currently rendered in the thread. */
+  loaded?: ReadonlySet<string>;
+}) {
   const who = quoted.from_me ? 'Kamu' : (quoted.sender_name ?? 'Pengirim');
   const accent = quoted.from_me ? '#4fc08d' : senderColor(quoted.sender_name ?? who);
   const thumb = quoted.thumbnail_b64 ? `data:image/jpeg;base64,${quoted.thumbnail_b64}` : null;
@@ -385,14 +416,18 @@ function QuotedPreview({ quoted, mine }: { quoted: QuotedMessage; mine: boolean 
     )[quoted.type] ||
     'Pesan';
 
-  return (
-    <div
-      className={clsx(
-        'mb-1 flex gap-2 overflow-hidden rounded-md pl-2',
-        mine ? 'bg-black/10 dark:bg-black/25' : 'bg-black/[0.06] dark:bg-white/[0.07]',
-      )}
-      style={{ borderLeft: `3.5px solid ${accent}` }}
-    >
+  // Two different reasons the original cannot be reached, and both end the
+  // same way: the quote stays a plain panel. `quoted.id` is null once the
+  // message has aged out of the synced window entirely; a id that the thread
+  // has not loaded belongs to a message older than the fifty on screen. Either
+  // way a button here would scroll nowhere, and the title says which it is
+  // rather than leaving the operator pressing a dead panel.
+  const target = quoted.id;
+  const onScreen = Boolean(target && (!loaded || loaded.has(target)));
+  const jumpable = Boolean(target && onJump && onScreen);
+
+  const body = (
+    <>
       <div className="min-w-0 flex-1 py-1.5 pr-1">
         <p className="truncate text-xs font-medium" style={{ color: accent }}>
           {who}
@@ -403,7 +438,47 @@ function QuotedPreview({ quoted, mine }: { quoted: QuotedMessage; mine: boolean 
         // eslint-disable-next-line @next/next/no-img-element -- inline data URI
         <img src={thumb} alt="" className="size-[50px] shrink-0 object-cover" />
       ) : null}
-    </div>
+    </>
+  );
+
+  const shell = clsx(
+    'mb-1 flex w-full gap-2 overflow-hidden rounded-md pl-2 text-left',
+    mine ? 'bg-black/10 dark:bg-black/25' : 'bg-black/[0.06] dark:bg-white/[0.07]',
+    jumpable && 'cursor-pointer transition-colors hover:brightness-95',
+  );
+  const edge = { borderLeft: `3.5px solid ${accent}` };
+
+  if (!jumpable) {
+    return (
+      <div
+        className={shell}
+        style={edge}
+        title={
+          target
+            ? 'Pesan aslinya lebih lama dari bagian percakapan yang terbuka'
+            : 'Pesan aslinya sudah di luar riwayat yang tersimpan'
+        }
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={shell}
+      style={edge}
+      title="Lihat pesan yang dibalas"
+      onClick={(event) => {
+        // The bubble above this one opens the media viewer and the menu; a
+        // press meant for the quote must not reach either.
+        event.stopPropagation();
+        onJump?.(target as string);
+      }}
+    >
+      {body}
+    </button>
   );
 }
 
@@ -426,6 +501,11 @@ function EditBox({
 }) {
   const [value, setValue] = useState(initial);
   const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  // The text is already written, so the box opens at the size it needs rather
+  // than making the operator scroll their own message to find the typo.
+  useAutoGrow(box, value, 12);
 
   async function save() {
     if (busy) return;
@@ -440,6 +520,7 @@ function EditBox({
   return (
     <div className="min-w-[220px]">
       <textarea
+        ref={box}
         autoFocus
         value={value}
         disabled={busy}
@@ -451,9 +532,9 @@ function EditBox({
           }
           if (event.key === 'Escape') onCancel();
         }}
-        rows={2}
+        rows={1}
         placeholder={placeholder}
-        className="w-full resize-y rounded-md bg-wa-panel px-2.5 py-1.5 text-sm text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
+        className="w-full resize-none rounded-md bg-wa-panel px-2.5 py-1.5 text-sm text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
       />
       <div className="mt-1 flex items-center justify-end gap-2 text-xs">
         <button type="button" onClick={onCancel} disabled={busy} className="text-wa-text-2">

@@ -29,6 +29,7 @@ import { EmojiPicker } from '@/components/chat/EmojiPicker';
 import { ForwardDialog } from '@/components/chat/ForwardDialog';
 import { GroupPanel } from '@/components/chat/GroupPanel';
 import { MediaViewer } from '@/components/chat/MediaViewer';
+import { useAutoGrow } from '@/components/chat/autogrow';
 import { DaySeparator, MessageBubble } from '@/components/chat/MessageBubble';
 import type { MessageAction } from '@/components/chat/MessageMenu';
 import { PollComposer } from '@/components/chat/PollComposer';
@@ -172,6 +173,9 @@ export function MessageThread({
   // dismiss it without also having to clear what was typed.
   const [slashOpen, setSlashOpen] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  // The box follows what is being written, up to ten lines, then scrolls.
+  useAutoGrow(composerRef, draft);
   const confirm = useConfirm();
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,6 +187,40 @@ export function MessageThread({
   // Bubbles that can be scrolled to, keyed by message id.
   const mentionRefs = useRef(new Map<string, HTMLDivElement>());
   const [flash, setFlash] = useState<string | null>(null);
+
+  /**
+   * Scrolls to the message a reply is answering, and says which one it is.
+   *
+   * The map and the highlight already exist for mentions, and this is the same
+   * question asked a different way — "which of the messages on screen is the
+   * one being pointed at" — so it reuses both rather than growing a second
+   * mechanism that could drift from the first.
+   *
+   * A quote whose original is no longer loaded never becomes a button, so the
+   * missing-node case here is only the brief window before a render settles.
+   */
+  // Recomputed per render of the list, which is what makes a quote become
+  // clickable the moment its target arrives rather than on the next thread
+  // switch.
+  const loadedMessageIds = useMemo(
+    () => new Set(messages.map((m) => m.id)),
+    [messages],
+  );
+
+  const jumpToMessage = useCallback((messageId: string) => {
+    const node = mentionRefs.current.get(messageId);
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlash(messageId);
+  }, []);
+
+  // Cleared on a timer rather than inside the jump, so pressing the same quote
+  // twice re-arms the highlight instead of leaving it lit from the first press.
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => setFlash(null), 2200);
+    return () => clearTimeout(timer);
+  }, [flash]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
@@ -213,8 +251,7 @@ export function MessageThread({
           // A brief highlight, because scrolling alone does not say which of
           // the messages on screen is the one being pointed at.
           setFlash(mentionAnchor);
-          const timer = setTimeout(() => setFlash(null), 2200);
-          return () => clearTimeout(timer);
+          return;
         }
       }
       if (unreadMark && unreadRef.current) {
@@ -736,6 +773,8 @@ export function MessageThread({
                     canRevokeAny={isGroupAdmin}
                     canManageMembers={isGroupAdmin}
                     senderMember={senderMember(message)}
+                    onJumpToQuoted={jumpToMessage}
+                    loadedMessageIds={loadedMessageIds}
                     // A reaction is a send like any other, so it is offered
                     // only while the account is actually connected.
                     onReact={
@@ -940,7 +979,11 @@ export function MessageThread({
             disabled={!canSend}
             placeholder={canSend ? 'Ketik pesan' : 'Tidak bisa mengirim saat terputus'}
             aria-label="Ketik pesan"
-            className="max-h-40 min-h-[42px] flex-1 resize-y rounded-lg bg-wa-panel px-4 py-[11px] text-base text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
+            // resize-none, because the height is now the content's to decide.
+            // Leaving the drag handle on would let a manual height win and then
+            // never give way, which is the fixed small box again with an extra
+            // step. min-h keeps the empty box the size of the send button.
+            className="min-h-[42px] flex-1 resize-none rounded-lg bg-wa-panel px-4 py-[11px] text-base text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
           />
           <button
             type="submit"
