@@ -30,12 +30,19 @@ import {
   accountsPath,
   connectAccount,
   deleteAccount,
+  resetLabelCollection,
   disconnectAccount,
   fetcher,
   syncAccount,
 } from '@/lib/api';
 import { useRealtimeEvent } from '@/lib/realtime';
-import type { Account, AccountStats, Application, LabelHealthReport } from '@/lib/types';
+import type {
+  Account,
+  AccountStats,
+  Application,
+  LabelHealth,
+  LabelHealthReport,
+} from '@/lib/types';
 
 type Tab = 'all' | 'qr' | 'waba';
 type SortKey = 'terbaru' | 'nama' | 'status';
@@ -53,6 +60,8 @@ export default function AccountsPage() {
   const [qrAccount, setQrAccount] = useState<Account | null>(null);
   const [detailAccount, setDetailAccount] = useState<Account | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Account | null>(null);
+  const [pendingReset, setPendingReset] = useState<LabelHealth | null>(null);
+  const [resetting, setResetting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -176,6 +185,28 @@ export default function AccountsPage() {
       await disconnectAccount(account.id);
       refreshAll();
     });
+
+  /**
+   * Rebuilds a number's label collection on WhatsApp's side.
+   *
+   * Not folded into `guard`: that one is keyed by account and drives the card's
+   * spinner, and this is driven from the warning banner, which is not a card.
+   */
+  async function handleResetLabels(account: LabelHealth) {
+    setResetting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { detail } = await resetLabelCollection(account.account_id);
+      setPendingReset(null);
+      setNotice(detail);
+      refreshAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Perintah reset gagal dikirim.');
+    } finally {
+      setResetting(false);
+    }
+  }
 
   const handleDelete = (account: Account) =>
     guard(account.id, async () => {
@@ -319,7 +350,7 @@ export default function AccountsPage() {
       </div>
 
       <div className="mt-4">
-        <LabelHealthNotice report={labelHealth} />
+        <LabelHealthNotice report={labelHealth} onReset={setPendingReset} />
       </div>
 
       <nav className="mt-6 flex gap-6 border-b border-hairline" aria-label="Metode koneksi">
@@ -559,6 +590,39 @@ export default function AccountsPage() {
         onClose={() => setDetailAccount(null)}
         onChanged={refreshAll}
       />
+
+      <Modal
+        open={Boolean(pendingReset)}
+        onClose={() => setPendingReset(null)}
+        title="Bangun ulang koleksi label?"
+        size="sm"
+        footer={
+          <>
+            <Button onClick={() => setPendingReset(null)}>Batal</Button>
+            <Button
+              variant="danger"
+              loading={resetting}
+              onClick={() => pendingReset && handleResetLabels(pendingReset)}
+            >
+              Ya, bangun ulang
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          Koleksi label <strong className="text-ink">{pendingReset?.label ?? pendingReset?.name}</strong>{' '}
+          rusak di sisi WhatsApp, bukan di sisi kita. Memasang ulang nomornya tidak
+          menolong: nomor ini sudah di-scan ulang dan gagal lagi di titik yang sama.
+        </p>
+        <p className="mt-3 text-sm text-ink-soft">
+          Perintah ini menyuruh HP membuang koleksi itu dan membangunnya dari nol.
+        </p>
+        <p className="mt-3 rounded-control border border-danger/25 bg-danger-soft/50 p-3 text-sm text-ink">
+          <strong className="text-danger">Semua perangkat tertaut nomor ini akan keluar</strong> —
+          sesi salesan dan WhatsApp Web lain yang sedang dipakai tim. Nomornya harus
+          scan QR ulang setelah ini.
+        </p>
+      </Modal>
 
       <Modal
         open={Boolean(pendingDelete)}

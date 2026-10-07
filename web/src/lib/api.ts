@@ -2150,3 +2150,17 @@ export async function exportLabelCategory(
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Asks WhatsApp to rebuild this number's label collection from scratch.
+ *
+ * Destructive: every linked device on the number is logged out and the number
+ * needs a fresh QR afterwards. It exists because nothing less reaches the
+ * problem — a number unlinked and re-paired from a clean QR failed again at the
+ * identical patch version, which places the broken data in WhatsApp's own
+ * record rather than in anything we store.
+ */
+export const resetLabelCollection = (id: string) =>
+  request<{ reset: boolean; detail: string }>(`/accounts/${id}/reset-labels`, {
+    method: 'POST',
+  });

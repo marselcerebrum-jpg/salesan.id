@@ -411,3 +411,40 @@ func (s *Server) handleLabelHealth(w http.ResponseWriter, r *http.Request) {
 		"needs_phone": blind + stale,
 	})
 }
+
+// handleResetLabelCollection asks WhatsApp to rebuild this number's label
+// collection from scratch.
+//
+//	POST /accounts/{id}/reset-labels
+//
+// Destructive and deliberately hard to reach by accident: it logs out every
+// linked device on the number, ours included, and the number needs a fresh QR
+// afterwards. It is here because nothing short of it works — a number unlinked
+// and re-paired from a clean QR failed again at the identical patch version,
+// which puts the broken data in WhatsApp's record rather than in ours.
+func (s *Server) handleResetLabelCollection(w http.ResponseWriter, r *http.Request) {
+	user := userFrom(r.Context())
+	id, ok := parseUUIDParam(w, chi.URLParam(r, "id"), "account_id")
+	if !ok {
+		return
+	}
+	account, err := s.repo.GetAccount(r.Context(), user.WorkspaceID, id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	if err := s.manager.ResetLabelCollection(r.Context(), id); err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	s.log.Warn("label collection reset requested by an operator",
+		"account_id", id, "account", account.Name, "by", user.ID)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"reset": true,
+		"detail": "Perintah terkirim. Nomor ini akan keluar dari semua perangkat tertaut " +
+			"dan perlu scan QR ulang; labelnya dibangun ulang oleh HP.",
+	})
+}

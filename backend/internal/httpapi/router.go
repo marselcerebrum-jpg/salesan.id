@@ -129,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 					r.Post("/disconnect", s.handleDisconnectAccount)
 					r.Post("/logout", s.handleLogoutAccount)
 					r.Post("/sync", s.handleSyncAccount)
+					r.Post("/reset-labels", s.handleResetLabelCollection)
 
 					r.Get("/conversations", s.handleListConversations)
 					r.Get("/conversations/counts", s.handleConversationCounts)

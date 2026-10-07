@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -925,4 +926,50 @@ func (s *Session) broadcastSyncState(_ context.Context, state, detail string) {
 		"state":      state,
 		"detail":     detail,
 	})
+}
+
+// ResetLabelCollection asks WhatsApp to throw away the account's label
+// collection and build it again from scratch.
+//
+// This is the only lever that reaches the server, and it exists because nothing
+// on our side can: two numbers were unlinked, re-paired from a fresh QR, and
+// failed again at the very same patch version their previous device failed at —
+// v994 and v2665. A device that was created minutes earlier cannot have
+// inherited a local fault, so the broken patch lives in WhatsApp's own record of
+// the account. Re-reading it, politely or by force, only reads the same broken
+// patch again.
+//
+// The cost is in whatsmeow's own words: "This will cause all linked devices to
+// be logged out." Every linked device, not only ours — any WhatsApp Web the team
+// has open on that number goes too, and the number needs a fresh QR afterwards.
+// That is why this is never automatic and never a retry: a person decides, for
+// one number, having been told.
+//
+// There is no reply to wait for. The notification is sent and the connection
+// ends, so a caller that gets nil here has sent it, not had it confirmed.
+func (m *Manager) ResetLabelCollection(ctx context.Context, accountID uuid.UUID) error {
+	s, ok := m.Session(accountID)
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if !s.IsConnected() {
+		return ErrNotConnected
+	}
+
+	s.log.Warn("resetting the label collection on WhatsApp; every linked device will be logged out",
+		"patch", appstate.WAPatchRegular)
+
+	if _, err := s.client.SendPeerMessage(ctx,
+		whatsmeow.BuildFatalAppStateExceptionNotification(appstate.WAPatchRegular)); err != nil {
+		return fmt.Errorf("kirim perintah reset koleksi label: %w", err)
+	}
+
+	// The account is about to be logged out by WhatsApp, so the labels it holds
+	// are a record of a collection that no longer exists. Saying so now is
+	// kinder than letting the next screen imply the old set is still live.
+	if err := m.repo.MarkLabelCollectionStale(ctx, accountID,
+		"koleksi label sedang dibangun ulang oleh HP; nomor ini perlu scan QR lagi"); err != nil {
+		s.log.Warn("could not record the reset", "err", err)
+	}
+	return nil
 }

@@ -2,7 +2,8 @@
 
 import { AlertTriangle, Smartphone } from 'lucide-react';
 
-import type { LabelHealthReport } from '@/lib/types';
+import { Button } from '@/components/ui/Button';
+import type { LabelHealth, LabelHealthReport } from '@/lib/types';
 
 /**
  * The warning that was missing.
@@ -18,7 +19,14 @@ import type { LabelHealthReport } from '@/lib/types';
  * absent entirely when there is nothing to say, because a warning that is always
  * on screen is furniture.
  */
-export function LabelHealthNotice({ report }: { report: LabelHealthReport | undefined }) {
+export function LabelHealthNotice({
+  report,
+  onReset,
+}: {
+  report: LabelHealthReport | undefined;
+  /** Opens the confirmation for rebuilding this number's collection. */
+  onReset: (account: LabelHealth) => void;
+}) {
   if (!report || report.needs_phone === 0) return null;
 
   const hurt = report.accounts
@@ -65,6 +73,15 @@ export function LabelHealthNotice({ report }: { report: LabelHealthReport | unde
                 tertinggal {formatStale(a.stale_hours)} · {a.label_count} label
               </span>
             )}
+
+            {/* Offered only where it is the answer. A number that is merely
+                behind recovers on its own and does not need every linked device
+                logged out to get there. */}
+            {a.severity === 'buta' ? (
+              <Button size="sm" variant="danger" onClick={() => onReset(a)}>
+                Bangun ulang label
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>
