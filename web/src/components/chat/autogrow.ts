@@ -24,6 +24,14 @@ export function useAutoGrow(
   ref: RefObject<HTMLTextAreaElement | null>,
   value: string,
   maxRows = 10,
+  /**
+   * A second ceiling, as a share of the window height.
+   *
+   * Rows alone are not enough where the box can be wide: eighteen rows of a
+   * 680px editor is taller than a laptop screen, and a box that runs past the
+   * bottom hides its own Save button. Whichever ceiling is lower wins.
+   */
+  maxViewportFraction?: number,
 ) {
   useLayoutEffect(() => {
     const el = ref.current;
@@ -39,10 +47,13 @@ export function useAutoGrow(
     const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
 
-    const ceiling = lineHeight * maxRows + padding + border;
+    let ceiling = lineHeight * maxRows + padding + border;
+    if (maxViewportFraction) {
+      ceiling = Math.min(ceiling, window.innerHeight * maxViewportFraction);
+    }
     const wanted = el.scrollHeight + border;
 
     el.style.height = `${Math.min(wanted, ceiling)}px`;
     el.style.overflowY = wanted > ceiling ? 'auto' : 'hidden';
-  }, [ref, value, maxRows]);
+  }, [ref, value, maxRows, maxViewportFraction]);
 }

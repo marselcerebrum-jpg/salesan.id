@@ -194,7 +194,17 @@ export function MessageBubble({
           // flush against their own edge. Media is capped tighter still: a
           // picture sized for a text paragraph dominates the thread.
           'relative text-sm leading-snug',
-          hasMedia ? 'max-w-[min(320px,80%)]' : 'max-w-[min(560px,72%)]',
+          // Reading and editing want different shapes. The reading cap keeps a
+          // paragraph from spanning a wide monitor, which is right until the
+          // operator has to work inside it: a 4,800-character promo message
+          // edited in a 250px column is a keyhole, and no amount of height
+          // fixes a narrow one. So the bubble gives way while the editor is
+          // open and takes its shape back when it closes.
+          editing
+            ? 'max-w-[min(680px,94%)]'
+            : hasMedia
+              ? 'max-w-[min(320px,80%)]'
+              : 'max-w-[min(560px,72%)]',
           bare
             ? 'p-0'
             : 'px-[9px] pt-[6px] pb-[8px] shadow-[0_1px_0.5px_rgba(11,20,26,0.13)]',
@@ -505,7 +515,7 @@ function EditBox({
 
   // The text is already written, so the box opens at the size it needs rather
   // than making the operator scroll their own message to find the typo.
-  useAutoGrow(box, value, 12);
+  useAutoGrow(box, value, 18, 0.5);
 
   async function save() {
     if (busy) return;
@@ -518,7 +528,7 @@ function EditBox({
   }
 
   return (
-    <div className="min-w-[220px]">
+    <div className="w-full min-w-[min(420px,70vw)]">
       <textarea
         ref={box}
         autoFocus
@@ -536,7 +546,10 @@ function EditBox({
         placeholder={placeholder}
         className="w-full resize-none rounded-md bg-wa-panel px-2.5 py-1.5 text-sm text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
       />
-      <div className="mt-1 flex items-center justify-end gap-2 text-xs">
+      {/* mt-2, not mt-1: at this text size four pixels between the last line
+          of a scrolled box and the buttons reads as the two touching, and a
+          Save button that looks stuck to the text looks like part of it. */}
+      <div className="mt-2 flex items-center justify-end gap-3 text-xs">
         <button type="button" onClick={onCancel} disabled={busy} className="text-wa-text-2">
           Batal
         </button>
