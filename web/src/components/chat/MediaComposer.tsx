@@ -25,6 +25,7 @@ import {
   type SetStateAction,
 } from 'react';
 
+import { useAutoGrow } from '@/components/chat/autogrow';
 import { ImageEditor } from '@/components/chat/ImageEditor';
 import { formatBytes, KIND_LABEL, kindOfFile, validateFile } from '@/lib/media';
 import type { AttachmentKind } from '@/lib/types';
@@ -112,6 +113,11 @@ export function MediaComposer({
 
   // Read through a ref so the key handler is bound once per opening rather
   // than re-bound on every keystroke in the caption field.
+  const captionRef = useRef<HTMLTextAreaElement>(null);
+  // Keyed on the caption of whichever file is open, so switching between two
+  // attached files resizes the box to the one now in front of the operator.
+  useAutoGrow(captionRef, current?.caption ?? '', 8);
+
   const state = useRef({ drafts, sending, onClose });
   state.current = { drafts, sending, onClose };
 
@@ -271,14 +277,22 @@ export function MediaComposer({
         <label className="sr-only" htmlFor="media-caption">
           Keterangan
         </label>
-        <input
+        {/* A textarea, not an input.
+            An <input> cannot hold a newline at all, so Enter in it had nowhere
+            to go — the caption was one unbroken line however it was written,
+            and a price list or an opening greeting arrived as a wall. Nothing
+            here sends on Enter, so the key does the one thing left for it to
+            do, and the box grows to show the result. */}
+        <textarea
+          ref={captionRef}
           id="media-caption"
           value={current.caption}
           onChange={(event) => patch(current.token, { caption: event.target.value })}
           disabled={sending || current.status === 'sent'}
           placeholder="Tambahkan keterangan"
           maxLength={1024}
-          className="w-full rounded-lg bg-wa-panel px-4 py-[11px] text-base text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
+          rows={1}
+          className="w-full resize-none rounded-lg bg-wa-panel px-4 py-[11px] text-base text-wa-text outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-wa-accent placeholder:text-wa-text-2 disabled:opacity-60"
         />
       </div>
 
