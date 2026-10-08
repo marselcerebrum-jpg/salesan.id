@@ -97,6 +97,23 @@ func (s *Session) captureIncomingMedia(
 	if !eager || att.Status == models.AttachmentStored {
 		return
 	}
+	// Somebody else's Status is recorded but not fetched, for the same reason a
+	// history backfill is not: nobody asked for it.
+	//
+	// It was costing almost everything. Of 61 GB of stored media, 59 GB was
+	// video from other people's Status — 16,193 files against 3,333 files and
+	// 1 GB for every real customer conversation on the system. Thirty gigabytes
+	// a day downloaded, held for two days, discarded, and downloaded again,
+	// none of it ever opened.
+	//
+	// The thumbnail still draws, because WhatsApp sends that with the message
+	// and it is already stored. Opening one still fetches it. The only thing
+	// lost is replaying a Status more than a day old, which WhatsApp has
+	// deleted by then anyway.
+	if evt.Info.Chat == types.StatusBroadcastJID {
+		s.log.Debug("status media recorded without fetching", "wa_id", evt.Info.ID)
+		return
+	}
 	s.mgr.queueDownload(s.WorkspaceID, s.AccountID, att.ID)
 }
 
