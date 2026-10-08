@@ -110,11 +110,27 @@ func (s *Session) captureIncomingMedia(
 	// and it is already stored. Opening one still fetches it. The only thing
 	// lost is replaying a Status more than a day old, which WhatsApp has
 	// deleted by then anyway.
-	if evt.Info.Chat == types.StatusBroadcastJID {
+	if isStatusChat(evt.Info.Chat) {
 		s.log.Debug("status media recorded without fetching", "wa_id", evt.Info.ID)
 		return
 	}
 	s.mgr.queueDownload(s.WorkspaceID, s.AccountID, att.ID)
+}
+
+// isStatusChat reports whether a message arrived on status@broadcast.
+//
+// Compared field by field rather than against types.StatusBroadcastJID whole.
+// A JID carries RawAgent, Device and Integrator alongside the user and server,
+// and `==` on the struct compares all five — so a chat that reads as
+// "status@broadcast" everywhere it is printed still fails the comparison when
+// the wire set one of the other three. That is what happened here: the guard
+// was written with `==`, deployed, and went on downloading every Status video
+// exactly as before, because the test it was making was never true.
+//
+// User and server are the two fields that mean anything for this question, and
+// they are the two whatsmeow itself compares in IsBroadcastList.
+func isStatusChat(chat types.JID) bool {
+	return chat.Server == types.BroadcastServer && chat.User == types.StatusBroadcastJID.User
 }
 
 // attachHistoryMedia records attachments for a completed backfill batch.
