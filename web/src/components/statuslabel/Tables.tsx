@@ -2,7 +2,7 @@
 
 import clsx from 'clsx';
 import { Search } from 'lucide-react';
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 
 import { AppMark } from '@/components/analytics/AppBadge';
 import { EmptyState, Spinner } from '@/components/ui/Primitives';
@@ -15,6 +15,7 @@ import type {
   LabelCategoryDay,
   LabelCategorySummary,
   LabelCategoryTransition,
+  LabelSpread,
 } from '@/lib/api';
 
 /* --- tahap 2: sebaran per aplikasi -------------------------------------------- */
@@ -587,46 +588,110 @@ export function DailyRecap({
 /* --- status saat ini ----------------------------------------------------------- */
 
 /** The three totals as they stand, each a way into its own drill-down. */
-export function CurrentState({
-  summary,
-  active,
-  onPick,
-}: {
-  summary: LabelCategorySummary | undefined;
-  active: LabelCategory;
-  onPick: (c: LabelCategory) => void;
-}) {
+/**
+ * Each application's own mix of the three statuses.
+ *
+ * The table beside this one answers the opposite question — it takes one
+ * status and shows which brands it came from, as a share of every brand
+ * together. This takes one brand and shows its own mix, as a share of itself.
+ *
+ * Both are needed and neither stands in for the other. A brand holding a
+ * quarter of every Hot customer in the workspace can still be mostly Cold
+ * inside, and somebody deciding where to put people needs that second answer.
+ * Reading it off the first table means dividing in your head against a total
+ * that is not on screen.
+ */
+export function LabelSpreadTable({ rows }: { rows: LabelSpread[] }) {
+  if (rows.length === 0) {
+    return <p className="p-6 text-sm text-ink-muted">Belum ada label yang terbaca.</p>;
+  }
+
+  // The workspace total, for the closing row. Summed here rather than asked of
+  // the server because it is the same numbers already on screen, and a figure
+  // fetched separately can disagree with the rows above it.
+  const all = rows.reduce(
+    (acc, r) => ({
+      cold: acc.cold + r.cold,
+      warm: acc.warm + r.warm,
+      hot: acc.hot + r.hot,
+      total: acc.total + r.total,
+    }),
+    { cold: 0, warm: 0, hot: 0, total: 0 },
+  );
+
   return (
-    <div className="grid gap-3 p-4 sm:grid-cols-3">
-      {CATEGORIES.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          onClick={() => onPick(c.id)}
-          aria-pressed={active === c.id}
-          className={clsx(
-            'flex items-center gap-3 rounded-card border p-4 text-left transition-colors',
-            c.banner,
-            active === c.id ? 'ring-2 ring-brand-700 ring-offset-2 ring-offset-surface-raised' : '',
-          )}
-        >
-          <span
-            className={clsx(
-              'grid size-10 shrink-0 place-items-center rounded-control bg-surface-raised',
-              c.tone,
-            )}
-          >
-            <c.icon className="size-5" aria-hidden />
-          </span>
-          <span className="min-w-0">
-            <span className={clsx('block text-sm font-medium', c.tone)}>{c.label}</span>
-            <span className="nums block text-2xl font-semibold text-ink">
-              {summary ? summary[c.id].toLocaleString('id-ID') : '–'}
-            </span>
-            <span className="block text-xs text-ink-muted">Customer</span>
-          </span>
-        </button>
-      ))}
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-hairline text-left text-2xs tracking-wide text-ink-muted uppercase">
+            <th className="px-4 py-2.5 font-medium">Aplikasi</th>
+            <th className="px-4 py-2.5 font-medium">Status</th>
+            <th className="px-4 py-2.5 text-right font-medium">Jumlah</th>
+            <th className="px-4 py-2.5 text-right font-medium">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((app) => (
+            <Fragment key={app.application_id ?? app.code}>
+              {CATEGORIES.map((c, i) => (
+                <tr key={c.id} className="border-b border-hairline/60">
+                  {/* The name spans its three rows rather than repeating, so
+                      the eye can tell at a glance where one brand ends. */}
+                  {i === 0 ? (
+                    <td
+                      rowSpan={CATEGORIES.length + 1}
+                      className="border-r border-hairline/60 px-4 py-2 align-middle font-medium text-ink"
+                    >
+                      {app.name}
+                    </td>
+                  ) : null}
+                  <td className={clsx('px-4 py-2 font-medium', c.tone)}>{c.label}</td>
+                  <td className="nums px-4 py-2 text-right text-ink">
+                    {app[c.id].toLocaleString('id-ID')}
+                  </td>
+                  <td className="nums px-4 py-2 text-right text-ink-soft">
+                    {share(app[c.id], app.total)}
+                  </td>
+                </tr>
+              ))}
+              <tr className="border-b border-hairline bg-surface-sunken/50">
+                <td className="px-4 py-2 font-medium text-ink-soft">Total</td>
+                <td className="nums px-4 py-2 text-right font-semibold text-ink">
+                  {app.total.toLocaleString('id-ID')}
+                </td>
+                <td className="nums px-4 py-2 text-right text-ink-muted">100%</td>
+              </tr>
+            </Fragment>
+          ))}
+
+          <tr className="bg-surface-sunken">
+            <td className="px-4 py-2.5 font-semibold text-ink">Seluruh aplikasi</td>
+            <td className="px-4 py-2.5 text-ink-soft">
+              {CATEGORIES.map((c) => `${c.label} ${all[c.id].toLocaleString('id-ID')}`).join(' · ')}
+            </td>
+            <td className="nums px-4 py-2.5 text-right font-semibold text-ink">
+              {all.total.toLocaleString('id-ID')}
+            </td>
+            <td className="nums px-4 py-2.5 text-right text-ink-muted">100%</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={4} className="px-4 py-2 text-2xs text-ink-muted">
+              Persentasenya dihitung terhadap total aplikasi itu sendiri, bukan terhadap
+              seluruh aplikasi. Jadi angka Hot 30% di satu aplikasi berarti tiga dari
+              sepuluh customernya Hot, bukan 30% dari seluruh customer Hot yang ada.
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
+
+/** A share of its own row's total, with nothing to divide by handled. */
+function share(part: number, total: number): string {
+  if (total <= 0) return '–';
+  return `${Math.round((part / total) * 1000) / 10}%`;
+}
+

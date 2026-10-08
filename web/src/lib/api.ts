@@ -2038,6 +2038,25 @@ export interface LabelCategoryApplication {
   contacts: number;
 }
 
+/**
+ * One application's own mix of the three statuses.
+ *
+ * The opposite question from LabelCategoryApplication: that one takes a status
+ * and shows which brands it came from, as a share of every brand together;
+ * this takes a brand and shows its own mix, as a share of itself.
+ */
+export interface LabelSpread {
+  application_id: string | null;
+  code: string;
+  name: string;
+  color: string;
+  cold: number;
+  warm: number;
+  hot: number;
+  /** The brand's own total — what the percentages divide by. */
+  total: number;
+}
+
 export interface LabelCategoryContact {
   contact_id: string;
   name: string;
@@ -2084,6 +2103,7 @@ export interface LabelCategoryDay {
 export interface LabelCategoryResponse {
   summary: LabelCategorySummary;
   applications?: LabelCategoryApplication[];
+  spread?: LabelSpread[];
   transitions?: LabelCategoryTransition[];
   daily?: LabelCategoryDay[];
   category?: LabelCategory;

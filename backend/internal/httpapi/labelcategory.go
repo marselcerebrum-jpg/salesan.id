@@ -77,6 +77,17 @@ func (s *Server) handleLabelCategorySummary(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		body["daily"] = daily
+
+		// Each brand's own mix, which is a different question from the one
+		// above: that splits a chosen category across the brands, this splits
+		// one brand across the categories. A brand holding a quarter of all Hot
+		// customers can still be mostly Cold inside, and only this says so.
+		spread, err := s.repo.LabelSpreadByApplication(r.Context(), sc, f)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		body["spread"] = spread
 	}
 
 	writeJSON(w, http.StatusOK, body)

@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
 import type { AccountRef, AppRef } from '@/lib/types';
 
 export interface StatusLabelFilter {
@@ -10,12 +8,21 @@ export interface StatusLabelFilter {
 }
 
 /**
- * Application and WhatsApp number, applied on a press rather than on a change.
+ * Application and WhatsApp number, applied the moment either one moves.
  *
- * Two dropdowns that each refetch the moment they move would send three
- * requests for one decision — pick a brand, pick a number, wait, pick again —
- * and the table underneath would rearrange itself twice while the operator was
- * still choosing. The button is what makes it one decision.
+ * There was a button here, on the reasoning that two dropdowns refetching on
+ * every change would send three requests for one decision and rearrange the
+ * table twice while the operator was still choosing. The reasoning holds and
+ * the conclusion did not: what actually happened is that people changed a
+ * dropdown, read the table, and believed what they read — because a filter
+ * that has visibly moved and a table that has not is indistinguishable from a
+ * filter that has been applied.
+ *
+ * A wasted request costs nothing anybody can feel. A number read under the
+ * wrong filter costs a decision. So the choice applies itself, and the one
+ * case the button existed for — picking a brand and then one of its numbers —
+ * is handled by clearing the number when the brand changes, which this has
+ * always done anyway.
  */
 export function FilterBar({
   applications,
@@ -28,33 +35,24 @@ export function FilterBar({
   value: StatusLabelFilter;
   onApply: (next: StatusLabelFilter) => void;
 }) {
-  const [draft, setDraft] = useState(value);
-
-  // The URL is allowed to change underneath this — a link somebody was sent, or
-  // stepping back up the breadcrumb — and the draft has to follow it, or the
-  // boxes would show one thing while the table shows another.
-  useEffect(() => setDraft(value), [value]);
-
-  // A number belongs to one brand. Offering all of them under a chosen brand
-  // would let somebody build a filter that cannot match anything.
-  const shown = draft.applicationId
-    ? accounts.filter((a) => a.application_id === draft.applicationId)
+  // Read straight from `value`, with no draft in between. The draft existed to
+  // hold a half-made choice until the button confirmed it; with no button there
+  // is no half-made choice, and a second copy of the state would only be
+  // something for the URL to disagree with.
+  const shown = value.applicationId
+    ? accounts.filter((a) => a.application_id === value.applicationId)
     : accounts;
-
-  const dirty =
-    draft.applicationId !== value.applicationId || draft.accountId !== value.accountId;
 
   return (
     <div className="flex flex-wrap items-end gap-3">
       <Field label="Aplikasi">
         <select
-          value={draft.applicationId}
-          onChange={(e) => {
-            const applicationId = e.target.value;
+          value={value.applicationId}
+          onChange={(e) =>
             // Clearing the number is not tidiness: keeping it would leave a
             // brand and a number that do not belong together.
-            setDraft({ applicationId, accountId: '' });
-          }}
+            onApply({ applicationId: e.target.value, accountId: '' })
+          }
           className="h-9 w-48 rounded-control border border-hairline bg-surface-raised px-2.5 text-sm text-ink"
         >
           <option value="">Semua App</option>
@@ -68,8 +66,8 @@ export function FilterBar({
 
       <Field label="Nomor WhatsApp">
         <select
-          value={draft.accountId}
-          onChange={(e) => setDraft({ ...draft, accountId: e.target.value })}
+          value={value.accountId}
+          onChange={(e) => onApply({ ...value, accountId: e.target.value })}
           className="h-9 w-56 rounded-control border border-hairline bg-surface-raised px-2.5 text-sm text-ink"
         >
           <option value="">Semua Nomor</option>
@@ -80,15 +78,6 @@ export function FilterBar({
           ))}
         </select>
       </Field>
-
-      <button
-        type="button"
-        onClick={() => onApply(draft)}
-        disabled={!dirty}
-        className="h-9 rounded-control bg-brand-700 px-4 text-sm font-medium text-white transition-colors hover:bg-brand-800 disabled:opacity-40"
-      >
-        Terapkan
-      </button>
     </div>
   );
 }

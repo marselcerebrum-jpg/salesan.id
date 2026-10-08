@@ -366,3 +366,45 @@ func onlyDigits(s string) string {
 	}
 	return b.String()
 }
+
+// LabelSpreadByApplication gives each application its own mix of the three
+// categories.
+//
+// The percentages are left to the caller, as in LabelCategoryByApplication, and
+// for the same reason: a rounded share stored beside its own numerator is two
+// numbers that can disagree on screen.
+func (r *Repo) LabelSpreadByApplication(
+	ctx context.Context, sc Scope, f models.AnalyticsFilter,
+) ([]models.LabelSpread, error) {
+	q := &queryArgs{}
+	scope := categoryScope(sc, f, q)
+
+	sql := "with" + fmt.Sprintf(currentCategoryCTE, scope) + `
+		select k.application_id, coalesce(app.code, '-'), coalesce(app.name, 'Tanpa aplikasi'),
+		       coalesce(app.color, '#64748B'),
+		       count(*) filter (where k.category = 'cold'),
+		       count(*) filter (where k.category = 'warm'),
+		       count(*) filter (where k.category = 'hot'),
+		       count(*)
+		  from kategori k
+		  left join public.applications app on app.id = k.application_id
+		 group by k.application_id, app.code, app.name, app.color
+		 order by count(*) desc`
+
+	rows, err := r.pool.Query(ctx, sql, q.args...)
+	if err != nil {
+		return nil, fmt.Errorf("label spread by application: %w", err)
+	}
+	defer rows.Close()
+
+	out := []models.LabelSpread{}
+	for rows.Next() {
+		var a models.LabelSpread
+		if err := rows.Scan(&a.ApplicationID, &a.Code, &a.Name, &a.Color,
+			&a.Cold, &a.Warm, &a.Hot, &a.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

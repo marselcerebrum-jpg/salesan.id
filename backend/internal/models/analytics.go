@@ -939,3 +939,29 @@ type LabelCategoryDay struct {
 	Warm int    `json:"warm"`
 	Hot  int    `json:"hot"`
 }
+
+// LabelSpread is one application's own split across the three categories.
+//
+// Distinct from LabelCategoryApplication, which answers the opposite question:
+// that one takes a category and shows which brands it came from, as a share of
+// every brand together. This one takes a brand and shows its own mix, as a
+// share of itself.
+//
+// Both are useful and neither substitutes for the other. A brand holding a
+// quarter of all Hot customers may still be mostly Cold inside, and a manager
+// deciding where to put people needs the second question answered, not the
+// first.
+type LabelSpread struct {
+	ApplicationID *uuid.UUID `json:"application_id"`
+	Code          string     `json:"code"`
+	Name          string     `json:"name"`
+	Color         string     `json:"color"`
+	Cold          int        `json:"cold"`
+	Warm          int        `json:"warm"`
+	Hot           int        `json:"hot"`
+	// Total is the brand's own total, which is what the percentages divide by.
+	// Carried rather than left to the reader because the three counts are the
+	// only other numbers on the row, and summing them by eye is exactly the
+	// step this table exists to remove.
+	Total int `json:"total"`
+}

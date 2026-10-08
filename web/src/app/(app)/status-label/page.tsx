@@ -12,7 +12,7 @@ import { CategoryBanner, CategoryPills, categoryOf } from '@/components/statusla
 import {
   ApplicationTable,
   ContactTable,
-  CurrentState,
+  LabelSpreadTable,
   CustomerJourney,
   DailyRecap,
   TransitionRecap,
@@ -45,7 +45,7 @@ const PAGE = 25;
 const TABS = [
   { id: 'harian', label: 'Rekap Harian' },
   { id: 'perpindahan', label: 'Rekap Perpindahan' },
-  { id: 'sekarang', label: 'Status Saat Ini' },
+  { id: 'sebaran', label: 'Sebaran Label' },
   { id: 'aplikasi', label: 'Detail Per Aplikasi' },
 ] as const;
 
@@ -66,9 +66,11 @@ const PANEL: Record<TabId, { title: string; hint: string }> = {
     title: 'Rekap Perpindahan Label',
     hint: 'Jumlah perubahan label antar status setiap hari.',
   },
-  sekarang: {
-    title: 'Status Saat Ini',
-    hint: 'Jumlah customer berdasarkan label terakhir yang dipasang padanya.',
+  sebaran: {
+    title: 'Sebaran Label per Aplikasi',
+    hint:
+      'Mix Cold, Warm dan Hot di dalam tiap aplikasi. Persentasenya terhadap total ' +
+      'aplikasi itu sendiri, bukan terhadap seluruh aplikasi.',
   },
   aplikasi: {
     title: 'Distribusi Customer per Aplikasi',
@@ -147,6 +149,7 @@ export default function StatusLabelPage() {
   const apps = useMemo(() => data?.applications ?? [], [data]);
   const transitions = useMemo(() => data?.transitions ?? [], [data]);
   const daily = useMemo(() => data?.daily ?? [], [data]);
+  const spread = useMemo(() => data?.spread ?? [], [data]);
 
   // Which brand the reader has drilled into. Held apart from the filter above:
   // the filter narrows what is counted, this picks one row to open.
@@ -400,16 +403,8 @@ export default function StatusLabelPage() {
               <DailyRecap rows={daily} current={summary} />
             ) : tab === 'perpindahan' ? (
               <TransitionRecap rows={transitions} />
-            ) : tab === 'sekarang' ? (
-              <CurrentState
-                summary={summary}
-                active={category}
-                onPick={(c) => {
-                  setCategory(c);
-                  setOpenApp(null);
-                  setPage(0);
-                }}
-              />
+            ) : tab === 'sebaran' ? (
+              <LabelSpreadTable rows={spread} />
             ) : (
               <ApplicationTable
                 loading={isLoading}
