@@ -182,6 +182,8 @@ export interface Conversation {
   /** Group metadata; null on a one-to-one chat. */
   group_description: string | null;
   group_owner_jid: string | null;
+  /** False once this number has left. Null on groups older than the flag. */
+  group_is_member: boolean | null;
   /**
    * Whether this account is an admin here — decides which group controls are
    * offered. WhatsApp remains the authority: a stale value produces a refusal

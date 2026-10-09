@@ -638,6 +638,8 @@ export interface SendMediaOptions {
   caption?: string;
   /** Send an image or video as a file, without WhatsApp recompressing it. */
   asDocument?: boolean;
+  /** Converts the picture into a WhatsApp sticker. No caption is carried. */
+  asSticker?: boolean;
   /**
    * Idempotency key for this file. Retrying with the same token reuses the
    * message the first attempt created instead of sending a second copy.
@@ -674,6 +676,7 @@ export async function sendMedia(
   form.append('client_token', opts.clientToken);
   if (opts.caption) form.append('caption', opts.caption);
   if (opts.asDocument) form.append('as_document', 'true');
+  if (opts.asSticker) form.append('as_sticker', 'true');
   if (opts.replyTo) form.append('reply_to', opts.replyTo);
   // The filename is the last argument; without it the browser sends "blob".
   form.append('file', opts.file, opts.fileName);
@@ -2195,4 +2198,16 @@ export const pinMessage = (id: string, pinned: boolean) =>
   request<{ message: Message }>(`/messages/${id}/pin`, {
     method: 'POST',
     body: JSON.stringify({ pinned }),
+  });
+
+/**
+ * Takes this number out of a group.
+ *
+ * Leaving only. The thread stays in the list, because the conversation and the
+ * analytics behind it outlive the membership — removing it is a separate call
+ * the operator makes deliberately.
+ */
+export const leaveGroup = (conversationId: string) =>
+  request<{ conversation: Conversation }>(`/conversations/${conversationId}/group/leave`, {
+    method: 'POST',
   });

@@ -614,6 +614,7 @@ function Inbox() {
         fileName: file.fileName,
         caption: file.caption,
         asDocument: file.asDocument,
+        asSticker: file.asSticker,
         clientToken: file.token,
         replyTo: file.replyTo ?? null,
         onProgress,
@@ -720,6 +721,20 @@ function Inbox() {
    * refetching fifty to learn it would scroll the operator away from whatever
    * they were reading.
    */
+  /**
+   * The open thread was removed, so nothing should still be pointing at it.
+   *
+   * The list is refetched rather than patched: a removal changes the counts
+   * beside every filter above it, and a list edited in place would keep
+   * showing the old ones until something else happened to refresh them.
+   */
+  function handleConversationRemoved() {
+    setSelectedId(null);
+    setMessages([]);
+    void mutateList();
+    void mutateCounts();
+  }
+
   async function handlePinMessage(message: Message, pinned: boolean) {
     setError(null);
     try {
@@ -1145,6 +1160,7 @@ function Inbox() {
           ownJids={ownJids}
           applicationId={applicationId}
           onConversationChange={handleConversationChange}
+          onConversationRemoved={handleConversationRemoved}
           onPrivateReplySent={handlePrivateReplySent}
           viewers={selected ? othersViewing[selected.id] : undefined}
         />
@@ -1186,6 +1202,7 @@ function Inbox() {
                 ownJids={ownJids}
                 applicationId={applicationId}
                 onConversationChange={handleConversationChange}
+                onConversationRemoved={handleConversationRemoved}
                 onPrivateReplySent={handlePrivateReplySent}
                 viewers={othersViewing[selected.id]}
               />

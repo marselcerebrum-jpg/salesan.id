@@ -114,6 +114,8 @@ interface MessageThreadProps {
   ownJids?: string[];
   /** Called when a group edit changes the conversation itself. */
   onConversationChange: (conversation: Conversation) => void;
+  /** The thread was removed; the list should move on from it. */
+  onConversationRemoved: () => void;
   /**
    * Called after a private reply to a group member has been sent, with the
    * one-to-one thread it landed in. The page decides what to do with that:
@@ -152,6 +154,7 @@ export function MessageThread({
   ownJids,
   viewers,
   onConversationChange,
+  onConversationRemoved,
   onPrivateReplySent,
 }: MessageThreadProps) {
   const [draft, setDraft] = useState('');
@@ -1103,6 +1106,7 @@ export function MessageThread({
         open={groupPanelOpen}
         onClose={() => setGroupPanelOpen(false)}
         onConversationChange={onConversationChange}
+        onConversationRemoved={onConversationRemoved}
       />
 
       <ConfirmDialog request={confirm.request} onClose={confirm.close} />

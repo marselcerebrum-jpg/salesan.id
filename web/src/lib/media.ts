@@ -299,3 +299,46 @@ export function mediaKindFromURL(url: string): 'image' | 'video' | null {
   }
   return null;
 }
+
+/** WhatsApp draws every sticker in a square of this size. */
+const STICKER_SIDE = 512;
+
+/**
+ * Turns a picture into something WhatsApp will accept as a sticker.
+ *
+ * WhatsApp takes WebP and nothing else here, at 512 by 512. A JPEG sent as a
+ * sticker is not rendered small — it is refused, by their server, with an error
+ * that arrives too late to be useful. Converting in the browser means the
+ * operator picks any photo they have and it becomes a sticker, rather than
+ * learning a format rule first.
+ *
+ * The picture is fitted inside the square rather than cropped to it, on
+ * transparent background. Cropping would quietly cut whatever sits at the edge,
+ * and the edge is where people put the thing they meant to send.
+ */
+export async function toStickerFile(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = STICKER_SIDE;
+    canvas.height = STICKER_SIDE;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Peramban ini tidak bisa mengolah gambar.');
+
+    const scale = Math.min(STICKER_SIDE / bitmap.width, STICKER_SIDE / bitmap.height);
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    ctx.drawImage(bitmap, (STICKER_SIDE - w) / 2, (STICKER_SIDE - h) / 2, w, h);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/webp', 0.92),
+    );
+    if (!blob) throw new Error('Gagal membuat stiker dari gambar ini.');
+
+    const base = file.name.replace(/\.[^.]+$/, '') || 'stiker';
+    return new File([blob], `${base}.webp`, { type: 'image/webp' });
+  } finally {
+    bitmap.close();
+  }
+}

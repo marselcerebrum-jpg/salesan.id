@@ -824,6 +824,22 @@ func (m *Manager) buildOutgoing(
 		}
 		return &waE2E.Message{ImageMessage: img}, nil
 
+	case media.KindSticker:
+		// No caption field exists on a sticker, and that is not an omission in
+		// this code: WhatsApp does not carry one. A caption typed beside a
+		// sticker would be silently dropped, so the composer does not offer the
+		// box rather than pretending the text went anywhere.
+		return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+			URL:           proto.String(up.URL),
+			DirectPath:    proto.String(up.DirectPath),
+			MediaKey:      up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256,
+			FileSHA256:    up.FileSHA256,
+			FileLength:    proto.Uint64(up.FileLength),
+			Mimetype:      proto.String(in.File.MIME),
+			ContextInfo:   ctxInfo,
+		}}, nil
+
 	case media.KindVideo:
 		return &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
 			URL:           proto.String(up.URL),

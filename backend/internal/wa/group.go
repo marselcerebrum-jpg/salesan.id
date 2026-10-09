@@ -348,3 +348,40 @@ func wrapGroupError(err error) error {
 	}
 	return err
 }
+
+// LeaveGroup takes this number out of a group.
+//
+// Not the same as removing a member, which is why UpdateGroupMember refuses to
+// aim at ourselves: leaving is irreversible without an invite, and on the last
+// admin's way out WhatsApp hands the group to somebody else rather than closing
+// it. Nothing here can delete a group for everyone — WhatsApp has no such
+// operation, and a button promising it would be lying.
+//
+// The conversation is kept. The thread is evidence of what was said, and the
+// analytics behind it are built from the same rows; a chat that vanishes
+// because somebody left a group takes a month of numbers with it. Removing it
+// from the list is a separate, deliberate second step.
+func (m *Manager) LeaveGroup(
+	ctx context.Context,
+	workspaceID, conversationID uuid.UUID,
+) error {
+	_, s, groupJID, err := m.groupContext(ctx, workspaceID, conversationID)
+	if err != nil {
+		return err
+	}
+
+	if err := s.client.LeaveGroup(ctx, groupJID); err != nil {
+		return fmt.Errorf("keluar dari grup: %w", err)
+	}
+	s.log.Info("left group", "group", groupJID.String())
+
+	// Marked straight away rather than waiting for WhatsApp to announce it.
+	// The announcement does arrive, but a list that still offers a send box on
+	// a group this number can no longer post to is worse than a moment of
+	// disagreement.
+	if err := m.repo.SetConversationFlag(ctx, s.AccountID, groupJID.String(), "group_is_member", false); err != nil {
+		s.log.Warn("mark group as left", "err", err)
+	}
+	m.broadcastGroup(ctx, workspaceID, conversationID)
+	return nil
+}

@@ -19,7 +19,8 @@ const conversationColumns = `
 	c.name, c.avatar_url, c.status::text, c.unread_count, c.mention_count, c.marked_unread,
 	c.last_message_id, c.last_message_at, c.last_message_text, c.last_message_direction,
 	c.wa_conversation_at, c.is_archived, c.is_pinned, ct.phone_number, c.updated_at,
-	c.pn_jid, c.group_description, c.group_owner_jid, c.self_is_admin`
+	c.pn_jid, c.group_description, c.group_owner_jid, c.self_is_admin,
+	c.group_is_member`
 
 // conversationOrder mirrors the WhatsApp inbox: pinned chats first, then the
 // most recent evidence of activity.
@@ -48,6 +49,7 @@ func scanConversation(row interface {
 		&c.LastMessageID, &c.LastMessageAt, &c.LastMessageText, &c.LastMessageDirection,
 		&c.WAConversationAt, &c.IsArchived, &c.IsPinned, &c.PhoneNumber, &c.UpdatedAt,
 		&c.PNJID, &c.GroupDescription, &c.GroupOwnerJID, &c.SelfIsAdmin,
+		&c.GroupIsMember,
 	)
 	if err != nil {
 		return nil, err
@@ -282,6 +284,10 @@ func (r *Repo) GetConversationByAccountChat(ctx context.Context, accountID uuid.
 var conversationFlags = map[string]string{
 	"is_archived": "is_archived",
 	"is_pinned":   "is_pinned",
+	// Set when this number leaves a group. Written here as well as by the
+	// membership sync so the send box disappears the moment the operator
+	// leaves, rather than at the next sweep.
+	"group_is_member": "group_is_member",
 }
 
 // SetConversationFlag toggles archive or pin state.

@@ -554,3 +554,31 @@ func (s *Server) handleUnassignLabel(w http.ResponseWriter, r *http.Request) {
 
 	s.applyChatLabel(w, r, convID, labelID, false)
 }
+
+// handleLeaveGroup takes this number out of a group.
+//
+//	POST /conversations/{id}/group/leave
+//
+// The thread stays. Leaving is about WhatsApp; removing the chat from the list
+// is about this workspace, and the second does not follow from the first —
+// a month of analytics is built on those rows. The browser calls DELETE on the
+// conversation afterwards when the operator asked for both.
+func (s *Server) handleLeaveGroup(w http.ResponseWriter, r *http.Request) {
+	user := userFrom(r.Context())
+	id, ok := parseUUIDParam(w, chi.URLParam(r, "id"), "conversation_id")
+	if !ok {
+		return
+	}
+
+	if err := s.manager.LeaveGroup(r.Context(), user.WorkspaceID, id); err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	conv, err := s.repo.GetConversation(r.Context(), user.WorkspaceID, id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
+}

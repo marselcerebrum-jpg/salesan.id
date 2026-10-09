@@ -65,6 +65,7 @@ func (s *Server) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 		clientToken string
 		replyToRaw  string
 		asDocument  bool
+		asSticker   bool
 		temp        *os.File
 		size        int64
 	)
@@ -93,6 +94,8 @@ func (s *Server) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 			clientToken = readField(part, 128)
 		case "as_document":
 			asDocument, _ = strconv.ParseBool(readField(part, 16))
+		case "as_sticker":
+			asSticker, _ = strconv.ParseBool(readField(part, 16))
 		case "reply_to":
 			replyToRaw = readField(part, 64)
 		case "file":
@@ -142,7 +145,7 @@ func (s *Server) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 		fileName = "berkas"
 	}
 
-	file, err := media.Classify(fileName, declared, head, size, asDocument)
+	file, err := media.ClassifyAs(fileName, declared, head, size, asDocument, asSticker)
 	if err != nil {
 		writeMediaValidationError(w, err)
 		return

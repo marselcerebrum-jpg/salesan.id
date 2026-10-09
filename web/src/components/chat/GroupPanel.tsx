@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ErrorNote } from '@/components/ui/Primitives';
-import { listGroupMembers, refreshGroup, updateGroup } from '@/lib/api';
+import { deleteConversation, leaveGroup, listGroupMembers, refreshGroup, updateGroup } from '@/lib/api';
 import { conversationTitle, initials } from '@/lib/format';
 import type { Conversation, GroupMember } from '@/lib/types';
 
@@ -33,16 +33,21 @@ export function GroupPanel({
   open,
   onClose,
   onConversationChange,
+  onConversationRemoved,
 }: {
   conversation: Conversation | null;
   open: boolean;
   onClose: () => void;
   onConversationChange: (conversation: Conversation) => void;
+  /** Called after the thread is removed, so the list can move on. */
+  onConversationRemoved: () => void;
 }) {
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingDesc, setEditingDesc] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<'leave' | 'leave-remove' | null>(null);
   const [desc, setDesc] = useState('');
   const [savingDesc, setSavingDesc] = useState(false);
 
@@ -114,6 +119,32 @@ export function GroupPanel({
   }
 
   const admins = members.filter((m) => m.is_admin).length;
+  // `group_is_member` is false once this number has left. Null on a group that
+  // predates the flag, which is read as "still in it" — the safer guess, since
+  // offering Leave on a group already left does nothing worse than fail.
+  const stillMember = conversation?.group_is_member !== false;
+
+  async function leave(alsoRemove: boolean) {
+    if (!conversationId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (stillMember) {
+        const { conversation: updated } = await leaveGroup(conversationId);
+        onConversationChange(updated);
+      }
+      if (alsoRemove) {
+        await deleteConversation(conversationId);
+        onConversationRemoved();
+        onClose();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal keluar dari grup.');
+    } finally {
+      setBusy(false);
+      setConfirm(null);
+    }
+  }
 
   return (
     <>
@@ -246,6 +277,80 @@ export function GroupPanel({
                 <MemberRow key={member.jid} member={member} />
               ))
             )}
+          </section>
+
+          {/* Last in the panel, and the only destructive thing in it.
+              Two buttons rather than one, because they are different
+              decisions: leaving is about WhatsApp, removing the thread is
+              about this workspace, and a month of analytics is built on those
+              rows. WhatsApp has no "delete group for everyone", so neither
+              button claims to. */}
+          <section className="border-t border-wa-border px-4 py-4">
+            <p className="text-xs font-medium tracking-wide text-wa-text-2 uppercase">
+              Keluar grup
+            </p>
+
+            {stillMember ? (
+              <p className="mt-1 text-xs text-wa-text-2">
+                Nomor ini keluar dari grup. Anggota lain melihatnya, dan untuk masuk
+                lagi perlu diundang.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-wa-text-2">
+                Nomor ini sudah tidak ada di grup. Chatnya masih tersimpan di sini.
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {stillMember ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirm('leave')}
+                  className="rounded-lg border border-danger/40 px-3 py-1.5 text-sm text-danger transition-colors hover:bg-danger-soft/40 disabled:opacity-50"
+                >
+                  Keluar grup
+                </button>
+              ) : null}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirm('leave-remove')}
+                className="rounded-lg border border-danger/40 px-3 py-1.5 text-sm text-danger transition-colors hover:bg-danger-soft/40 disabled:opacity-50"
+              >
+                {stillMember ? 'Keluar & hapus chat' : 'Hapus chat'}
+              </button>
+            </div>
+
+            {confirm ? (
+              <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft/40 p-3">
+                <p className="text-xs text-ink">
+                  {confirm === 'leave'
+                    ? 'Keluar dari grup ini? Untuk kembali, nomor ini harus diundang lagi.'
+                    : stillMember
+                      ? 'Keluar dari grup dan hapus chatnya? Seluruh pesan di percakapan ini ikut hilang, dan angka performanya tidak bisa dikembalikan.'
+                      : 'Hapus chat grup ini? Seluruh pesannya ikut hilang, dan angka performanya tidak bisa dikembalikan.'}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setConfirm(null)}
+                    className="rounded-md px-2.5 py-1 text-xs text-wa-text-2 hover:bg-wa-active disabled:opacity-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void leave(confirm === 'leave-remove')}
+                    className="rounded-md bg-danger px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                  >
+                    {busy ? 'Memproses…' : 'Ya, lanjutkan'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>
       </aside>

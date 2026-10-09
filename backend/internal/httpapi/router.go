@@ -163,6 +163,7 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/members", s.handleGroupMembers)
 				r.Post("/members", s.handleUpdateGroupMember)
 				r.Post("/group/refresh", s.handleRefreshGroup)
+				r.Post("/group/leave", s.handleLeaveGroup)
 				r.Patch("/group", s.handleUpdateGroup)
 				r.Get("/first-mention", s.handleFirstMention)
 				r.Get("/messages", s.handleListMessages)

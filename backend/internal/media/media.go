@@ -152,7 +152,21 @@ type File struct {
 //   - head    : the first bytes of the file, at least 512 where available
 //   - size    : the exact byte length
 //   - asDoc   : caller asks for document treatment (the "Dokumen" menu entry)
+// AsSticker asks Classify to present an image as a WhatsApp sticker.
+//
+// A separate argument rather than a guess from the extension: WebP is an
+// ordinary picture format and most WebP files are pictures. Only the operator
+// knows which of the two they meant, and sending a photo as a sticker by
+// accident is not a small mistake — stickers have no caption and cannot be
+// forwarded the same way.
+type AsSticker bool
+
 func Classify(name, declared string, head []byte, size int64, asDoc bool) (File, error) {
+	return ClassifyAs(name, declared, head, size, asDoc, false)
+}
+
+// ClassifyAs is Classify with the sticker choice made explicit.
+func ClassifyAs(name, declared string, head []byte, size int64, asDoc, asSticker bool) (File, error) {
 	if size <= 0 {
 		return File{}, ErrEmptyFile
 	}
@@ -184,6 +198,19 @@ func Classify(name, declared string, head []byte, size int64, asDoc bool) (File,
 			return File{}, fmt.Errorf("%w: %s", ErrTypeBlocked, mime)
 		}
 		kind = KindDocument
+	}
+	// A sticker is a picture WhatsApp draws without a bubble. Only a picture
+	// can become one, and only WebP: WhatsApp rejects the rest outright, and a
+	// refusal that arrives from their server is far harder to explain than one
+	// that arrives here with the reason attached.
+	if asSticker {
+		if kind != KindImage {
+			return File{}, fmt.Errorf("%w: stiker harus berupa gambar", ErrTypeBlocked)
+		}
+		if mime != "image/webp" {
+			return File{}, fmt.Errorf("%w: stiker harus WebP, bukan %s", ErrTypeBlocked, mime)
+		}
+		kind = KindSticker
 	}
 	if kind == "" {
 		return File{}, fmt.Errorf("%w: %s", ErrTypeBlocked, mime)

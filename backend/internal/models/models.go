@@ -307,6 +307,11 @@ type Conversation struct {
 	// remains the authority — a stale value produces a refusal from the server,
 	// not a silent no-op.
 	SelfIsAdmin bool `json:"self_is_admin"`
+	// GroupIsMember is false once this number has left the group. Null on a
+	// group that predates the flag, which readers treat as still a member:
+	// offering Leave on a group already left costs an error message, while
+	// hiding it on one still joined costs the operator the only way out.
+	GroupIsMember *bool `json:"group_is_member"`
 }
 
 // Message is a single WhatsApp message.
