@@ -821,12 +821,22 @@ export interface AnalyticsQuery {
    * narrowed this way would silently mean something else.
    */
   in_schedule?: string;
+  /**
+   * Asks the per-application split to carry its daily rows.
+   *
+   * Only the export sets it. The table draws one line per application, and a
+   * month of days for each would be the bulk of a response nobody reads.
+   */
+  daily?: boolean;
 }
 
 function analyticsSearch(params: AnalyticsQuery, extra: Record<string, string> = {}) {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries({ ...params, ...extra })) {
-    if (value) q.set(key, value);
+    // Stringified rather than typed as string: `daily` is a flag, and a flag
+    // that is false has to stay out of the query entirely, not arrive as
+    // "false" for the server to parse back into the same thing.
+    if (value) q.set(key, String(value));
   }
   const suffix = q.toString();
   return suffix ? `?${suffix}` : '';

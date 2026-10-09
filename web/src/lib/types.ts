@@ -800,6 +800,8 @@ export interface MemberBreakdown {
 export interface ApplicationPerformance {
   application: AppRef;
   summary: DashboardSummary;
+  /** Day by day, present only when the export asked for it. */
+  days?: PerformanceDay[];
   /**
    * Contacts this application holds right now, across all of its numbers.
    *

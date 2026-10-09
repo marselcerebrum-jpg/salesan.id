@@ -63,6 +63,12 @@ func (r *Repo) PerformanceByApplication(
 			return fmt.Errorf("application %s: %w", app.Code, err)
 		}
 		out[i] = models.ApplicationPerformance{Application: app, Summary: report.Summary}
+		if f.WithDays {
+			// Already in hand: Performance builds the days on its way to the
+			// total, and dropping them here was the only reason the export had
+			// nothing but monthly figures to write.
+			out[i].Days = report.Days
+		}
 		return nil
 	}); err != nil {
 		return nil, err

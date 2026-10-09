@@ -106,6 +106,13 @@ type WorkSchedule struct {
 // calendar dates before it reaches SQL, so a "day" means the same thing
 // everywhere rather than depending on the server's clock.
 type AnalyticsFilter struct {
+	// WithDays asks the per-application split to carry its daily rows.
+	//
+	// Off by default: the table on screen shows one line per application, and
+	// sending a month of days for each of them would be the bulk of the
+	// response spent on rows that are never drawn.
+	WithDays bool
+
 	From time.Time
 	To   time.Time
 	// ChatType is "", "personal" or "group". Broadcast never enters either:
@@ -364,6 +371,15 @@ type MemberBreakdown struct {
 type ApplicationPerformance struct {
 	Application AppRef           `json:"application"`
 	Summary     DashboardSummary `json:"summary"`
+	// Days is the same figures broken down day by day, present only when the
+	// caller asked for it.
+	//
+	// Computed either way — the per-application summary comes from the ordinary
+	// performance aggregate, which produces the days on its way to the total —
+	// so this costs nothing to produce and only bandwidth to send. Thirteen
+	// applications across a month is four hundred rows nobody reads on the
+	// screen, which is why the screen does not ask for it and the export does.
+	Days []PerformanceDay `json:"days,omitempty"`
 	// ContactsTotal is how many contacts this application holds RIGHT NOW,
 	// across every one of its numbers.
 	//

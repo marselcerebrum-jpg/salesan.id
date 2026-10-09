@@ -6,14 +6,19 @@ import useSWR from 'swr';
 
 import { AppMark } from '@/components/analytics/AppBadge';
 import { Disclosure } from '@/components/analytics/Disclosure';
-import { GroupedBreakdown, type GroupedRow } from '@/components/analytics/GroupedBreakdown';
+import {
+  GroupedBreakdown,
+  downloadCSVFile,
+  type GroupedRow,
+} from '@/components/analytics/GroupedBreakdown';
+import { groupedCSV } from '@/components/analytics/dailyColumns';
 import { ErrorState, RowSkeleton } from '@/components/analytics/Primitives';
 import {
   fetcher,
   performanceByApplicationPath,
   type AnalyticsQuery,
 } from '@/lib/api';
-import type { ApplicationPerformance } from '@/lib/types';
+import type { ApplicationPerformance, PerformanceDay } from '@/lib/types';
 
 /**
  * The same period, one row per application.
@@ -82,6 +87,38 @@ export function ApplicationBreakdown({
   );
 
   const apps = useMemo(() => data?.applications ?? [], [data]);
+
+  /**
+   * The export is a month of days per application, not the one line each the
+   * table draws.
+   *
+   * The table answers "which brand is doing better". The file is for the
+   * question the table cannot be made to answer — what happened on the third,
+   * and was the dip one day or the whole week. Those are different shapes, so
+   * the file is fetched rather than taken off the screen.
+   *
+   * The server computes the days either way on its road to the totals above,
+   * so this costs one request and no extra work there.
+   */
+  async function exportDaily() {
+    const { applications } = await fetcher<{ applications: ApplicationPerformance[] }>(
+      performanceByApplicationPath({ ...listQuery, daily: true }),
+    );
+
+    const rows: { label: string; sub: string; summary: PerformanceDay }[] = [];
+    for (const app of applications) {
+      for (const day of app.days ?? []) {
+        rows.push({ label: app.application.name, sub: day.date, summary: day });
+      }
+      // The month's own total, after its days. Recomputed by the server rather
+      // than summed from the rows above it — contact figures count distinct
+      // people over the period, and adding up thirty daily counts would count
+      // somebody who wrote on two days twice.
+      rows.push({ label: app.application.name, sub: 'TOTAL', summary: app.summary });
+    }
+
+    downloadCSVFile('rincian-per-aplikasi-harian', groupedCSV('Aplikasi', rows, 'Tanggal'));
+  }
   const active = query.application_id ?? null;
 
   // Personal when the view is narrowed to one account, combined otherwise. The
@@ -190,7 +227,12 @@ export function ApplicationBreakdown({
           Akun ini belum mengerjakan apa pun di aplikasi mana pun pada periode ini.
         </p>
       ) : (
-        <GroupedBreakdown rows={rows} subjectLabel="Aplikasi" csvName="rincian-per-aplikasi" />
+        <GroupedBreakdown
+          rows={rows}
+          subjectLabel="Aplikasi"
+          csvName="rincian-per-aplikasi"
+          onExport={exportDaily}
+        />
       )}
 
       {personal && idle > 0 ? (

@@ -433,6 +433,10 @@ func (s *Server) handlePerformanceByApplication(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Asked for only by the export. The table above it draws one line per
+	// application and would pay for four hundred rows to show thirteen.
+	f.WithDays = queryBool(r, "daily")
+
 	apps, err := s.repo.PerformanceByApplication(r.Context(), sc, f)
 	if err != nil {
 		writeAppError(w, err)

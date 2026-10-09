@@ -360,16 +360,25 @@ export function dailyCSV(rows: PerformanceDay[]): string {
  */
 export function groupedCSV(
   firstHeader: string,
-  rows: { label: string; summary: PerformanceDay }[],
+  rows: { label: string; sub?: string; summary: PerformanceDay }[],
+  /**
+   * A second label column, for an export that breaks each subject down
+   * further — one line per application per day rather than per application.
+   *
+   * Its own column rather than appended to the label: a spreadsheet can group
+   * by application or pivot by date only if the two are separable, and
+   * "JADIASN — 2026-10-03" in one cell is neither.
+   */
+  secondHeader?: string,
 ): string {
-  const header = [firstHeader];
+  const header = secondHeader ? [firstHeader, secondHeader] : [firstHeader];
   for (const g of DAILY_GROUPS) {
     for (const c of g.columns) header.push(`${g.label} - ${c.label}`);
   }
 
   const lines = [header.join(',')];
   for (const row of rows) {
-    const cells: string[] = [row.label];
+    const cells: string[] = secondHeader ? [row.label, row.sub ?? ''] : [row.label];
     for (const g of DAILY_GROUPS) {
       for (const c of g.columns) {
         const v = (c.raw ?? c.value)(row.summary);

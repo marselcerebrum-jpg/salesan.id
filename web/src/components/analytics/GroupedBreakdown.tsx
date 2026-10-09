@@ -49,16 +49,35 @@ export function GroupedBreakdown({
   rows,
   subjectLabel,
   csvName,
+  onExport,
   /** Sorted by this column initially; "subject" means the first column. */
   initialSort = 'subject',
 }: {
   rows: GroupedRow[];
   subjectLabel: string;
   csvName: string;
+  /**
+   * Replaces the default export, for a table whose CSV is not simply its rows.
+   *
+   * The per-application export wants a month of days for each application,
+   * which the table above it never draws — so it fetches its own and builds
+   * the file itself rather than making every caller carry rows it does not
+   * show.
+   */
+  /**
+   * Replaces the built-in export when the file is not what the table shows.
+   *
+   * Whoever supplies this owns the scope: it must ask the server with the same
+   * filter the table was drawn from, so the file cannot carry rows the page
+   * would have refused to draw.
+   */
+  onExport?: () => Promise<void> | void;
   initialSort?: string;
 }) {
   const [sortKey, setSortKey] = useState(initialSort);
   const [desc, setDesc] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
     const column = DAILY_GROUPS.flatMap((g) => g.columns).find((c) => c.key === sortKey);
@@ -94,15 +113,31 @@ export function GroupedBreakdown({
 
   return (
     <>
-      <div className="mb-2 flex justify-end">
+      <div className="mb-2 flex items-center justify-end gap-3">
+        {/* Said out loud rather than swallowed: a supplied export fetches, and a
+            fetch that fails would otherwise look like a button that does
+            nothing. */}
+        {exportError ? <span className="text-xs text-danger">{exportError}</span> : null}
         <button
           type="button"
-          onClick={() => downloadCSV(csvName, subjectLabel, sorted)}
-          disabled={sorted.length === 0}
+          onClick={() => {
+            if (!onExport) {
+              downloadCSV(csvName, subjectLabel, sorted);
+              return;
+            }
+            setExporting(true);
+            setExportError(null);
+            void Promise.resolve(onExport())
+              .catch((err: unknown) =>
+                setExportError(err instanceof Error ? err.message : 'Export gagal.'),
+              )
+              .finally(() => setExporting(false));
+          }}
+          disabled={sorted.length === 0 || exporting}
           className="inline-flex items-center gap-1.5 rounded-control border border-hairline bg-surface-raised px-2.5 py-1.5 text-xs font-medium text-ink-soft transition-colors hover:bg-surface-sunken disabled:opacity-50"
         >
           <Download className="size-3.5" />
-          Export CSV
+          {exporting ? 'Menyiapkan…' : 'Export CSV'}
         </button>
       </div>
 
@@ -181,8 +216,7 @@ export function GroupedBreakdown({
  * Exports exactly the rows on screen.
  *
  * Built from what was already fetched, so it carries precisely the scope the
- * reader is allowed to see: there is no second, wider query behind it that
- * could hand somebody data the page would not show them.
+ * reader is allowed to see: nothing is asked of the server for this file.
  */
 function downloadCSV(
   name: string,
@@ -191,7 +225,18 @@ function downloadCSV(
   // table to draw them in does not have to invent a `subject` cell for one.
   rows: { label: string; summary: DashboardSummary }[],
 ) {
-  const blob = new Blob([groupedCSV(subjectLabel, rows)], { type: 'text/csv;charset=utf-8' });
+  downloadCSVFile(name, groupedCSV(subjectLabel, rows));
+}
+
+/**
+ * Hands the browser a finished CSV.
+ *
+ * Shared so an `onExport` that builds a different file does not carry its own
+ * copy of the blob dance, which is the kind of duplicate that ends with two
+ * exports disagreeing about the file name or the encoding.
+ */
+export function downloadCSVFile(name: string, csv: string) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
