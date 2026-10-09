@@ -61,8 +61,12 @@ func scanConversation(row interface {
 // ListConversations returns the inbox sidebar (reference screen 6).
 func (r *Repo) ListConversations(ctx context.Context, workspaceID uuid.UUID, f models.ConversationFilter) ([]models.Conversation, error) {
 	args := []any{workspaceID, f.AccountID}
+	archived := "c.is_archived = false"
+	if f.ArchivedOnly {
+		archived = "c.is_archived = true"
+	}
 	where := []string{
-		"c.workspace_id = $1", "c.account_id = $2", "c.is_archived = false",
+		"c.workspace_id = $1", "c.account_id = $2", archived,
 		// The Status thread is never an inbox row. It has its own screen, and
 		// left in here it sat among real customers carrying everybody's Status
 		// as one unread count.
@@ -745,26 +749,35 @@ type ConversationCounts struct {
 	New        int `json:"new"`
 	InProgress int `json:"in_progress"`
 	Done       int `json:"done"`
+	// Archived counts what the other six exclude, so the entry into the
+	// archive can say how much is in there without being opened.
+	Archived int `json:"archived"`
 }
 
 // CountConversations computes every chip count in a single pass.
 func (r *Repo) CountConversations(ctx context.Context, workspaceID, accountID uuid.UUID) (*ConversationCounts, error) {
 	var c ConversationCounts
 	err := r.pool.QueryRow(ctx, `
-		select count(*),
-		       count(*) filter (where type = 'personal'),
-		       count(*) filter (where type = 'group'),
-		       count(*) filter (where unread_count > 0 or marked_unread),
-		       count(*) filter (where status = 'new'),
-		       count(*) filter (where status = 'in_progress'),
-		       count(*) filter (where status = 'done')
+		select count(*) filter (where not is_archived),
+		       count(*) filter (where not is_archived and type = 'personal'),
+		       count(*) filter (where not is_archived and type = 'group'),
+		       count(*) filter (where not is_archived and (unread_count > 0 or marked_unread)),
+		       count(*) filter (where not is_archived and status = 'new'),
+		       count(*) filter (where not is_archived and status = 'in_progress'),
+		       count(*) filter (where not is_archived and status = 'done'),
+		       -- The archive is the other side of the same line, so it is
+		       -- counted in the same pass. Every chip above says "not
+		       -- archived" out loud rather than inheriting it from the where
+		       -- clause, because the where clause now has to let both sides
+		       -- through for this one count to exist at all.
+		       count(*) filter (where is_archived)
 		  from public.conversations
-		 where workspace_id = $1 and account_id = $2 and is_archived = false
+		 where workspace_id = $1 and account_id = $2
 		   -- Same exclusion as the list these chips sit above: a count that
 		   -- includes a row the list will not show is a count nobody can check.
 		   and type <> 'status'`,
 		workspaceID, accountID,
-	).Scan(&c.All, &c.Personal, &c.Group, &c.Unread, &c.New, &c.InProgress, &c.Done)
+	).Scan(&c.All, &c.Personal, &c.Group, &c.Unread, &c.New, &c.InProgress, &c.Done, &c.Archived)
 	if err != nil {
 		return nil, err
 	}

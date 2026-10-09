@@ -2,6 +2,7 @@
 
 import clsx from 'clsx';
 import {
+  Archive,
   AtSign,
   ChevronDown,
   Eraser,
@@ -24,6 +25,15 @@ export interface InboxFilters {
   unread: boolean;
   /** Only groups that named this account and have not been looked at. */
   mentions: boolean;
+  /**
+   * Shows the archive instead of the inbox.
+   *
+   * A place rather than a filter, which is why it sits apart from the others
+   * and clears them when entered: archived chats are the ones deliberately
+   * set aside, and reading them through yesterday's unread filter would show
+   * an empty list and no reason why.
+   */
+  archived: boolean;
   labelId: string;
 }
 
@@ -32,6 +42,7 @@ export const EMPTY_FILTERS: InboxFilters = {
   type: '',
   unread: false,
   mentions: false,
+  archived: false,
   labelId: '',
 };
 
@@ -256,6 +267,30 @@ export function ConversationList({
             value={filters.labelId}
             onChange={(labelId) => patch({ labelId })}
           />
+
+          {/* Last, and separated: entering the archive is leaving the inbox,
+              not narrowing it. Shown even at zero once something has ever been
+              archived would need a second question of the server; shown always
+              costs one chip and answers "where did that group go" without the
+              operator having to ask anybody. */}
+          <Chip
+            active={filters.archived}
+            onClick={() =>
+              patch(
+                filters.archived
+                  ? { archived: false }
+                  : // The other filters are cleared on the way in. An archive
+                    // read through "belum dibaca" is usually empty, and an
+                    // empty list that looks like the archive being empty is
+                    // the wrong answer to the question being asked.
+                    { archived: true, unread: false, mentions: false, labelId: '' },
+              )
+            }
+          >
+            <Archive className="size-3" />
+            Arsip
+            {counts?.archived ? <span className="text-ink-muted">{counts.archived}</span> : null}
+          </Chip>
         </div>
 
       </div>
@@ -265,7 +300,9 @@ export function ConversationList({
           <p className="px-4 py-8 text-center text-sm text-ink-muted">Memuat percakapan…</p>
         ) : conversations.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-ink-muted">
-            Tidak ada percakapan pada filter ini.
+            {filters.archived
+              ? 'Arsip masih kosong. Chat yang diarsip dari HP maupun dari sini akan muncul di halaman ini.'
+              : 'Tidak ada percakapan pada filter ini.'}
           </p>
         ) : (
           <ul>

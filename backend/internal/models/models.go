@@ -483,6 +483,13 @@ type ConversationFilter struct {
 	// MentionsOnly narrows to chats that named this account and have not been
 	// looked at yet.
 	MentionsOnly bool
+	// ArchivedOnly shows the archive instead of the inbox.
+	//
+	// A switch rather than a third value on the type filter, because archiving
+	// is not a kind of chat — an archived group and an archived customer are
+	// both archived, and both still have their type. WhatsApp separates them
+	// the same way: the archive is a place you go, not a shape you filter by.
+	ArchivedOnly bool
 	LabelID      *uuid.UUID
 	Limit        int
 	Offset       int

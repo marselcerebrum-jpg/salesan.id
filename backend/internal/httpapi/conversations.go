@@ -32,6 +32,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		Status:       oneOf(r.URL.Query().Get("status"), models.ConversationStatusNew, models.ConversationStatusInProgress, models.ConversationStatusDone),
 		UnreadOnly:   queryBool(r, "unread"),
 		MentionsOnly: queryBool(r, "mentions"),
+		ArchivedOnly: queryBool(r, "archived"),
 		LabelID:      queryUUID(r, "label_id"),
 		Limit:        queryInt(r, "limit", 100),
 		Offset:       queryInt(r, "offset", 0),

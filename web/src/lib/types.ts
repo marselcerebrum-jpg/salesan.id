@@ -211,6 +211,8 @@ export interface ConversationCounts {
   new: number;
   in_progress: number;
   done: number;
+  /** How many sit in the archive, so the entry can say so unopened. */
+  archived: number;
 }
 
 export type AttachmentKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';

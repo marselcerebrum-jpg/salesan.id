@@ -247,6 +247,8 @@ export interface ConversationQuery {
   unread?: boolean;
   /** Only chats that named this account and have not been looked at yet. */
   mentions?: boolean;
+  /** The archive instead of the inbox. */
+  archived?: boolean;
   label_id?: string;
   limit?: number;
 }
@@ -258,6 +260,7 @@ export function conversationsPath(accountId: string, query: ConversationQuery = 
   if (query.status) q.set('status', query.status);
   if (query.unread) q.set('unread', 'true');
   if (query.mentions) q.set('mentions', 'true');
+  if (query.archived) q.set('archived', 'true');
   if (query.label_id) q.set('label_id', query.label_id);
   if (query.limit) q.set('limit', String(query.limit));
   const suffix = q.toString() ? `?${q}` : '';

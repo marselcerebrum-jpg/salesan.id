@@ -244,6 +244,7 @@ function Inbox() {
     type: filters.type || undefined,
     unread: filters.unread || undefined,
     mentions: filters.mentions || undefined,
+    archived: filters.archived || undefined,
     label_id: filters.labelId || undefined,
   });
 
