@@ -3,6 +3,7 @@
 import clsx from 'clsx';
 import {
   Archive,
+  ArchiveRestore,
   AtSign,
   ChevronDown,
   Eraser,
@@ -55,6 +56,7 @@ interface ConversationListProps {
   selectedId: string | null;
   onSelect: (conversation: Conversation) => void;
   onMarkUnread: (conversation: Conversation) => void;
+  onArchive: (conversation: Conversation, archived: boolean) => void;
   onDelete: (conversation: Conversation, clearOnly: boolean) => void;
   onToggleLabel: (conversation: Conversation, labelId: string, attached: boolean) => void;
   loading: boolean;
@@ -207,6 +209,7 @@ export function ConversationList({
   selectedId,
   onSelect,
   onMarkUnread,
+  onArchive,
   onDelete,
   onToggleLabel,
   loading,
@@ -314,6 +317,7 @@ export function ConversationList({
                 labels={labels}
                 onSelect={onSelect}
                 onMarkUnread={onMarkUnread}
+                onArchive={onArchive}
                 onDelete={onDelete}
                 onToggleLabel={onToggleLabel}
                 viewing={viewers?.[conv.id]}
@@ -339,6 +343,7 @@ function RowMenu({
   labels,
   onClose,
   onMarkUnread,
+  onArchive,
   onToggleLabel,
   onDelete,
 }: {
@@ -347,6 +352,7 @@ function RowMenu({
   labels: Label[];
   onClose: () => void;
   onMarkUnread: (conversation: Conversation) => void;
+  onArchive: (conversation: Conversation, archived: boolean) => void;
   onToggleLabel: (conversation: Conversation, labelId: string, attached: boolean) => void;
   onDelete: (conversation: Conversation, clearOnly: boolean) => void;
 }) {
@@ -382,6 +388,25 @@ function RowMenu({
         >
           <MailQuestion className="size-4 text-ink-muted" />
           Tandai belum dibaca
+        </button>
+
+        {/* Second, under "mark unread", because the two are the everyday pair:
+            set aside for later, or put back. Destructive items stay below. */}
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onArchive(conversation, !conversation.is_archived);
+            onClose();
+          }}
+          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-surface-sunken"
+        >
+          {conversation.is_archived ? (
+            <ArchiveRestore className="size-4 text-ink-muted" />
+          ) : (
+            <Archive className="size-4 text-ink-muted" />
+          )}
+          {conversation.is_archived ? 'Keluarkan dari arsip' : 'Arsipkan chat'}
         </button>
 
         <button
@@ -454,6 +479,7 @@ function ConversationRow({
   labels,
   onSelect,
   onMarkUnread,
+  onArchive,
   onDelete,
   onToggleLabel,
   viewing,
@@ -463,6 +489,7 @@ function ConversationRow({
   labels: Label[];
   onSelect: (conversation: Conversation) => void;
   onMarkUnread: (conversation: Conversation) => void;
+  onArchive: (conversation: Conversation, archived: boolean) => void;
   onDelete: (conversation: Conversation, clearOnly: boolean) => void;
   onToggleLabel: (conversation: Conversation, labelId: string, attached: boolean) => void;
   /** Colleagues with this thread open, if any. */
@@ -620,6 +647,7 @@ function ConversationRow({
           labels={labels}
           onClose={() => setMenuAt(null)}
           onMarkUnread={onMarkUnread}
+          onArchive={onArchive}
           onDelete={onDelete}
           onToggleLabel={onToggleLabel}
         />

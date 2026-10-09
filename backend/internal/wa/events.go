@@ -171,6 +171,10 @@ func (s *Session) handleChatFlag(jid types.JID, column string, value bool) {
 		s.log.Warn("apply chat flag", "chat", chat, "column", column, "err", err)
 		return
 	}
+	// Logged on success, not only on failure. Silence used to mean both "it
+	// worked" and "the event never arrived", which made "I archived it on my
+	// phone and nothing happened here" a question with no way to answer it.
+	s.log.Info("chat flag from phone", "chat", chat, "flag", column, "value", value)
 	s.broadcastConversation(ctx, chat)
 }
 

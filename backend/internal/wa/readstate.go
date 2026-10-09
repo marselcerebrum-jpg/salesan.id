@@ -85,3 +85,60 @@ func messageKey(anchor *repository.ChatAnchor, chatJID types.JID) *waCommon.Mess
 	}
 	return key
 }
+
+// ArchivePush says what reached the phone, in the same shape as a read-state
+// push and for the same reason: the row here is written either way, and the
+// operator is owed the difference.
+type ArchivePush struct {
+	PushedToPhone bool   `json:"pushed_to_phone"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+// SetChatArchived moves a chat into or out of the archive, on WhatsApp and here.
+//
+// Lives in regular_low beside read state, which is the collection that syncs
+// normally on nearly every account — unlike `regular`, where labels live and
+// where several numbers are wedged.
+//
+// WhatsApp first, then the local row. A chat shown as archived here that the
+// phone never archived is the divergence the operator would discover a week
+// later, wondering why the chat came back.
+func (m *Manager) SetChatArchived(
+	ctx context.Context,
+	workspaceID, conversationID uuid.UUID,
+	archived bool,
+) (*ArchivePush, error) {
+	conv, err := m.repo.GetConversation(ctx, workspaceID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &ArchivePush{}
+	s, ok := m.Session(conv.AccountID)
+	if !ok || !s.IsConnected() {
+		out.Reason = "Akun WhatsApp tidak terhubung — arsip baru tersimpan di sini, belum dikirim ke HP."
+	} else {
+		anchor, err := m.repo.ChatAnchorFor(ctx, workspaceID, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		chatJID, err := types.ParseJID(anchor.ChatJID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid chat jid %q: %w", anchor.ChatJID, err)
+		}
+
+		patch := appstate.BuildArchive(chatJID, archived, anchor.Timestamp, messageKey(anchor, chatJID))
+		if err := s.client.SendAppState(ctx, patch); err != nil {
+			s.log.Warn("push archive to phone", "chat", anchor.ChatJID, "archived", archived, "err", err)
+			out.Reason = "WhatsApp menolak perubahan: " + err.Error()
+		} else {
+			s.log.Info("archive pushed to phone", "chat", anchor.ChatJID, "archived", archived)
+			out.PushedToPhone = true
+		}
+	}
+
+	if err := m.repo.SetConversationFlag(ctx, conv.AccountID, conv.ChatJID, "is_archived", archived); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

@@ -2262,3 +2262,16 @@ export const sendSticker = (
       reply_to: replyTo ?? '',
     }),
   });
+
+/**
+ * Moves a chat into or out of the archive.
+ *
+ * `push` says whether the change reached the phone. It is written here either
+ * way — an account that is briefly disconnected should not silently refuse an
+ * archive — and the caller is told the difference rather than left to assume.
+ */
+export const archiveConversation = (conversationId: string, archived: boolean) =>
+  request<{ conversation: Conversation; push: { pushed_to_phone: boolean; reason?: string } }>(
+    `/conversations/${conversationId}/archive`,
+    { method: 'POST', body: JSON.stringify({ archived }) },
+  );

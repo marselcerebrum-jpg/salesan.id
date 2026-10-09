@@ -167,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 				r.Patch("/", s.handleUpdateConversation)
 				r.Delete("/", s.handleDeleteConversation)
 				r.Post("/read", s.handleMarkConversationRead)
+				r.Post("/archive", s.handleArchiveConversation)
 				r.Post("/unread", s.handleMarkConversationUnread)
 				r.Get("/members", s.handleGroupMembers)
 				r.Post("/members", s.handleUpdateGroupMember)

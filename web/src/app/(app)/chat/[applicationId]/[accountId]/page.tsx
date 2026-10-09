@@ -42,6 +42,7 @@ import {
   conversationsPath,
   createPoll,
   deleteConversation,
+  archiveConversation,
   deleteMessage,
   pinMessage,
   sendSticker,
@@ -761,6 +762,29 @@ function Inbox() {
     void mutateList();
   }
 
+  /**
+   * Moves a chat into or out of the archive, here and on the phone.
+   *
+   * The list is refetched rather than patched: archiving removes the row from
+   * whichever side is being viewed, and the chip counts beside it change too.
+   */
+  async function handleArchive(conversation: Conversation, archived: boolean) {
+    setError(null);
+    try {
+      const { push } = await archiveConversation(conversation.id, archived);
+      // Surfaced through the same banner as a failure, because a change
+      // that reached our database but not the phone is a half-done thing the
+      // operator has to know about — the chat will come back when the account
+      // reconnects and the phone's own state wins.
+      if (push?.reason) setError(push.reason);
+      if (selectedId === conversation.id) setSelectedId(null);
+      void mutateList();
+      void mutateCounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengubah arsip.');
+    }
+  }
+
   async function handlePinMessage(message: Message, pinned: boolean) {
     setError(null);
     try {
@@ -1117,6 +1141,7 @@ function Inbox() {
             selectedId={selectedId}
             onSelect={openConversation}
             onMarkUnread={handleMarkUnread}
+          onArchive={handleArchive}
             onDelete={handleDelete}
             onToggleLabel={handleToggleLabel}
             loading={listLoading}

@@ -583,3 +583,36 @@ func (s *Server) handleLeaveGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv})
 }
+
+// handleArchiveConversation moves a chat into or out of the archive.
+//
+//	POST /conversations/{id}/archive   {"archived": true}
+//
+// One route for both directions, because WhatsApp treats it as one flag and
+// splitting it would invent a distinction the protocol does not make.
+func (s *Server) handleArchiveConversation(w http.ResponseWriter, r *http.Request) {
+	user := userFrom(r.Context())
+	id, ok := parseUUIDParam(w, chi.URLParam(r, "id"), "conversation_id")
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Archived bool `json:"archived"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	push, err := s.manager.SetChatArchived(r.Context(), user.WorkspaceID, id, req.Archived)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	conv, err := s.repo.GetConversation(r.Context(), user.WorkspaceID, id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversation": conv, "push": push})
+}
