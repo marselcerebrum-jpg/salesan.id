@@ -1674,3 +1674,15 @@ export interface LabelHealthReport {
   stale: number;
   needs_phone: number;
 }
+
+/** One entry in the workspace's sticker library. */
+export interface Sticker {
+  id: string;
+  name: string | null;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+  created_by: string | null;
+  /** Signed link, minted per request. Empty when the file could not be signed. */
+  url: string;
+}

@@ -28,7 +28,7 @@ import {
 import { useAutoGrow } from '@/components/chat/autogrow';
 import { applyListBreak } from '@/components/chat/listcontinue';
 import { ImageEditor } from '@/components/chat/ImageEditor';
-import { formatBytes, KIND_LABEL, kindOfFile, toStickerFile, validateFile } from '@/lib/media';
+import { formatBytes, KIND_LABEL, kindOfFile, validateFile } from '@/lib/media';
 import type { AttachmentKind } from '@/lib/types';
 
 /** One queued file, with its edits and its send state. */
@@ -43,7 +43,6 @@ export interface Draft {
   name: string;
   kind: AttachmentKind;
   asDocument: boolean;
-  asSticker: boolean;
   caption: string;
   previewUrl: string | null;
   /** True once the editor has replaced `file` with an edited version. */
@@ -59,7 +58,6 @@ export interface SendDraft {
   fileName: string;
   caption: string;
   asDocument: boolean;
-  asSticker: boolean;
   /** The message this file answers, quoted the way a text reply is. */
   replyTo?: string | null;
 }
@@ -197,18 +195,13 @@ export function MediaComposer({
         patch(draft.token, { status: 'sending', progress: 0, error: null });
 
         try {
-          // Converted here rather than when the box is ticked: ticking is a
-          // thought the operator may change, and a conversion done then would
-          // have to be undone to get the original back.
-          const payload = draft.asSticker ? await toStickerFile(draft.file) : draft.file;
           await onSendFile(
             {
               token: draft.token,
-              file: payload,
-              fileName: payload.name,
+              file: draft.file,
+              fileName: draft.name,
               caption: draft.caption.trim(),
               asDocument: draft.asDocument,
-              asSticker: draft.asSticker,
             },
             (fraction) => patch(draft.token, { progress: fraction }),
             controller.signal,
@@ -293,10 +286,8 @@ export function MediaComposer({
       </div>
 
       {/* Per-file caption. WhatsApp attaches a caption to each file rather than
-          one to the batch, and so does this.
-          Absent for a sticker: WhatsApp has no caption field on one, so a box
-          here would take text that never arrives anywhere. */}
-      <div className={clsx('border-t border-wa-border px-4 pt-3', current.asSticker && 'hidden')}>
+          one to the batch, and so does this. */}
+      <div className="border-t border-wa-border px-4 pt-3">
         <label className="sr-only" htmlFor="media-caption">
           Keterangan
         </label>
@@ -349,33 +340,11 @@ export function MediaComposer({
             <span className="text-xs text-wa-text-2">Sudah diedit</span>
           ) : null}
 
-          {/* Offered only on a picture, because only a picture can become one.
-              Mutually exclusive with "send as file": one asks WhatsApp not to
-              touch the bytes, the other replaces them entirely. */}
-          <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-wa-text-2">
-            <input
-              type="checkbox"
-              checked={current.asSticker}
-              disabled={sending || current.asDocument}
-              onChange={(event) =>
-                patch(current.token, {
-                  asSticker: event.target.checked,
-                  kind: event.target.checked ? 'sticker' : kindOfFile(current.file, false),
-                  // A sticker carries no caption on WhatsApp, so whatever was
-                  // typed is dropped here rather than silently at the far end.
-                  caption: event.target.checked ? '' : current.caption,
-                })
-              }
-              className="size-3.5 accent-wa-accent"
-            />
-            Kirim sebagai stiker
-          </label>
-
           <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-xs text-wa-text-2">
             <input
               type="checkbox"
               checked={current.asDocument}
-              disabled={sending || current.asSticker}
+              disabled={sending}
               onChange={(event) =>
                 patch(current.token, {
                   asDocument: event.target.checked,
@@ -617,7 +586,6 @@ export function makeDrafts(
       name: file.name,
       kind,
       asDocument,
-      asSticker: false,
       caption: '',
       // Only media gets an object URL; a 90 MB document has nothing to preview
       // and would hold the memory for nothing.

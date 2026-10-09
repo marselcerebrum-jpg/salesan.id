@@ -43,6 +43,7 @@ import type {
   User,
   Workspace,
   WorkSchedule,
+  Sticker,
 } from '@/lib/types';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
@@ -638,8 +639,6 @@ export interface SendMediaOptions {
   caption?: string;
   /** Send an image or video as a file, without WhatsApp recompressing it. */
   asDocument?: boolean;
-  /** Converts the picture into a WhatsApp sticker. No caption is carried. */
-  asSticker?: boolean;
   /**
    * Idempotency key for this file. Retrying with the same token reuses the
    * message the first attempt created instead of sending a second copy.
@@ -676,7 +675,6 @@ export async function sendMedia(
   form.append('client_token', opts.clientToken);
   if (opts.caption) form.append('caption', opts.caption);
   if (opts.asDocument) form.append('as_document', 'true');
-  if (opts.asSticker) form.append('as_sticker', 'true');
   if (opts.replyTo) form.append('reply_to', opts.replyTo);
   // The filename is the last argument; without it the browser sends "blob".
   form.append('file', opts.file, opts.fileName);
@@ -2210,4 +2208,54 @@ export const pinMessage = (id: string, pinned: boolean) =>
 export const leaveGroup = (conversationId: string) =>
   request<{ conversation: Conversation }>(`/conversations/${conversationId}/group/leave`, {
     method: 'POST',
+  });
+
+/** The workspace's sticker library. */
+export const listStickers = () => request<{ stickers: Sticker[] }>('/stickers');
+
+/**
+ * Adds one sticker to the library.
+ *
+ * The file is already WebP at 512 square by the time it gets here — the
+ * browser converts it, because only the browser can show the operator what
+ * they are about to save.
+ */
+export async function addSticker(file: File, name: string): Promise<Sticker> {
+  const token = await accessToken();
+  const form = new FormData();
+  form.append('name', name);
+  form.append('file', file, file.name);
+
+  const res = await fetch(`${API_URL}/api/v1/stickers`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  const payload = (await res.json().catch(() => null)) as
+    | { sticker?: Sticker; detail?: string; message?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(payload?.detail ?? payload?.message ?? 'Stiker gagal ditambahkan.');
+  }
+  if (!payload?.sticker) throw new Error('Stiker gagal ditambahkan.');
+  return payload.sticker;
+}
+
+export const deleteSticker = (id: string) =>
+  request<{ deleted: boolean }>(`/stickers/${id}`, { method: 'DELETE' });
+
+/** Sends one sticker from the library into a conversation. */
+export const sendSticker = (
+  conversationId: string,
+  stickerId: string,
+  clientToken: string,
+  replyTo: string | null,
+) =>
+  request<{ message: Message }>(`/conversations/${conversationId}/stickers`, {
+    method: 'POST',
+    body: JSON.stringify({
+      sticker_id: stickerId,
+      client_token: clientToken,
+      reply_to: replyTo ?? '',
+    }),
   });

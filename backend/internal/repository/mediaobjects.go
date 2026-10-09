@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -165,7 +166,19 @@ func (r *Repo) ReleaseStorageObjects(
 		       select 1
 		         from public.message_attachments a
 		        where a.storage_path = k
-		          and a.id <> all($2::uuid[]))`, keys, ignore)
+		          and a.id <> all($2::uuid[]))
+		   -- A sticker holds its file open for as long as it is in the library.
+		   -- Attachments expire after two days because they are a copy of a
+		   -- conversation that still exists on the phone; a sticker is a tool,
+		   -- and one that disappears from the drawer after two days is not a
+		   -- tool. Without this clause the sweep would free the file the moment
+		   -- the last message carrying it aged out, and every tile in the panel
+		   -- would break at once.
+		   and not exists (
+		       select 1
+		         from public.stickers st
+		        where st.storage_path = k
+		          and st.deleted_at is null)`, keys, ignore)
 	if err != nil {
 		return nil, err
 	}
@@ -197,4 +210,106 @@ func (r *Repo) ReleaseStorageObjects(
 		return nil, err
 	}
 	return free, nil
+}
+
+// Sticker is one entry in a workspace's sticker library.
+type Sticker struct {
+	ID          uuid.UUID  `json:"id"`
+	Name        *string    `json:"name"`
+	StoragePath string     `json:"-"`
+	MIME        string     `json:"mime_type"`
+	SizeBytes   int64      `json:"size_bytes"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CreatedBy   *uuid.UUID `json:"created_by"`
+	// URL is filled in by the handler: a signed link lives minutes, so it
+	// belongs to the response rather than to the row.
+	URL string `json:"url"`
+}
+
+// ListStickers returns a workspace's library, newest first.
+func (r *Repo) ListStickers(ctx context.Context, workspaceID uuid.UUID) ([]Sticker, error) {
+	rows, err := r.pool.Query(ctx, `
+		select id, name, storage_path, mime_type, size_bytes, created_at, created_by
+		  from public.stickers
+		 where workspace_id = $1 and deleted_at is null
+		 order by created_at desc`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Sticker{}
+	for rows.Next() {
+		var s Sticker
+		if err := rows.Scan(&s.ID, &s.Name, &s.StoragePath, &s.MIME,
+			&s.SizeBytes, &s.CreatedAt, &s.CreatedBy); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// AddSticker records a sticker, or returns the one already holding that image.
+//
+// Returning the existing row rather than refusing: two people uploading the
+// same picture have not made a mistake, and an error about a duplicate they
+// cannot see is a worse answer than the tile they were trying to create.
+func (r *Repo) AddSticker(
+	ctx context.Context,
+	workspaceID uuid.UUID, name *string, path, mime string, size int64, sha string, by uuid.UUID,
+) (*Sticker, error) {
+	var s Sticker
+	err := r.pool.QueryRow(ctx, `
+		insert into public.stickers
+			(workspace_id, name, storage_path, mime_type, size_bytes, file_sha256, created_by)
+		values ($1, nullif($2, ''), $3, $4, $5, $6, $7)
+		on conflict (workspace_id, file_sha256) where deleted_at is null
+		do update set name = coalesce(public.stickers.name, excluded.name)
+		returning id, name, storage_path, mime_type, size_bytes, created_at, created_by`,
+		workspaceID, derefStr(name), path, mime, size, sha, by,
+	).Scan(&s.ID, &s.Name, &s.StoragePath, &s.MIME, &s.SizeBytes, &s.CreatedAt, &s.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// GetSticker loads one sticker, scoped to its workspace.
+func (r *Repo) GetSticker(ctx context.Context, workspaceID, id uuid.UUID) (*Sticker, error) {
+	var s Sticker
+	err := r.pool.QueryRow(ctx, `
+		select id, name, storage_path, mime_type, size_bytes, created_at, created_by
+		  from public.stickers
+		 where id = $1 and workspace_id = $2 and deleted_at is null`, id, workspaceID,
+	).Scan(&s.ID, &s.Name, &s.StoragePath, &s.MIME, &s.SizeBytes, &s.CreatedAt, &s.CreatedBy)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return &s, nil
+}
+
+// DeleteSticker takes a sticker out of the library.
+//
+// Soft, and deliberately: the file may still be carried by messages already
+// sent, and the sweep decides when it is genuinely unreferenced. Marking the
+// row is what removes the tile; the bytes go when nothing points at them.
+func (r *Repo) DeleteSticker(ctx context.Context, workspaceID, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		update public.stickers set deleted_at = now()
+		 where id = $1 and workspace_id = $2 and deleted_at is null`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

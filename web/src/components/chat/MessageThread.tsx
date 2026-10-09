@@ -27,6 +27,7 @@ import {
   type SendDraft,
 } from '@/components/chat/MediaComposer';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
+import { StickerPicker } from '@/components/chat/StickerPicker';
 import { ForwardDialog } from '@/components/chat/ForwardDialog';
 import { GroupPanel } from '@/components/chat/GroupPanel';
 import { MediaViewer } from '@/components/chat/MediaViewer';
@@ -58,6 +59,7 @@ import type {
   PresenceViewer,
   PrivateReplyTarget,
   QuickReply,
+  Sticker,
 } from '@/lib/types';
 
 interface MessageThreadProps {
@@ -106,6 +108,8 @@ interface MessageThreadProps {
   onPinMessage: (message: Message, pinned: boolean) => Promise<void>;
   /** Adds or clears a reaction; an empty emoji takes this account's back. */
   onReactMessage: (message: Message, emoji: string) => Promise<void>;
+  /** Sends one sticker from the library into this thread. */
+  onSendSticker: (sticker: Sticker, replyTo: string | null) => Promise<void>;
   /** Where the unread run begins, and how many messages it covers. */
   unreadMark: { messageId: string; count: number } | null;
   /** A mention to open the thread at, taking precedence over the divider. */
@@ -149,6 +153,7 @@ export function MessageThread({
   onDeleteMessage,
   onPinMessage,
   onReactMessage,
+  onSendSticker,
   unreadMark,
   mentionAnchor,
   ownJids,
@@ -961,6 +966,15 @@ export function MessageThread({
         <div className="relative flex items-end gap-1">
           <AttachmentMenu disabled={!canSend} onPick={openPicker} />
           <EmojiPicker disabled={!canSend} onPick={insertEmoji} />
+          {/* Beside the emoji tray, as WhatsApp has it: a sticker is reached
+              for while writing, not fetched from the attachment screen. */}
+          <StickerPicker
+            disabled={!canSend}
+            onSend={async (sticker) => {
+              await onSendSticker(sticker, replyTo?.id ?? null);
+              setReplyTo(null);
+            }}
+          />
           {/* One hidden input serves every menu entry; its accept/capture
               attributes change with the entry that opened it. */}
           <input

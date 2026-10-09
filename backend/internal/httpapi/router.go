@@ -108,6 +108,14 @@ func (s *Server) Handler() http.Handler {
 					Get("/{id}/accounts", s.handleListApplicationAccounts)
 			})
 
+			// Pustaka stiker milik ruang kerja, bukan milik satu percakapan:
+			// satu berkas dipakai ke banyak chat.
+			r.Route("/stickers", func(r chi.Router) {
+				r.Get("/", s.handleListStickers)
+				r.Post("/", s.handleAddSticker)
+				r.Delete("/{id}", s.handleDeleteSticker)
+			})
+
 			r.Route("/accounts", func(r chi.Router) {
 				r.Get("/", s.handleListAccounts)
 				r.Post("/", s.handleCreateAccount)
@@ -169,6 +177,7 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/messages", s.handleListMessages)
 				r.Post("/messages", s.handleSendMessage)
 				r.Post("/media", s.handleSendMedia)
+				r.Post("/stickers", s.handleSendSticker)
 				// A picture quick reply, sent whole. Text replies never come
 				// through here — those are pasted into the composer and edited
 				// before they go, which is the point of a canned answer.

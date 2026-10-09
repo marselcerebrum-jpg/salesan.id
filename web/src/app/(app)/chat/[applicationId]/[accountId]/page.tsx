@@ -44,6 +44,7 @@ import {
   deleteConversation,
   deleteMessage,
   pinMessage,
+  sendSticker,
   editMessage,
   fetcher,
   forwardMessage,
@@ -80,6 +81,7 @@ import type {
   PresenceViewersPayload,
   PrivateReplyTarget,
   QuickReply,
+  Sticker,
 } from '@/lib/types';
 
 /**
@@ -614,7 +616,6 @@ function Inbox() {
         fileName: file.fileName,
         caption: file.caption,
         asDocument: file.asDocument,
-        asSticker: file.asSticker,
         clientToken: file.token,
         replyTo: file.replyTo ?? null,
         onProgress,
@@ -733,6 +734,30 @@ function Inbox() {
     setMessages([]);
     void mutateList();
     void mutateCounts();
+  }
+
+  /**
+   * Sends one sticker from the library.
+   *
+   * A fresh token per press, unlike a file retry which reuses one: pressing
+   * the same tile twice is two stickers, and WhatsApp users do send the same
+   * one twice. Deduplicating that would be correcting the operator.
+   */
+  async function handleSendSticker(sticker: Sticker, replyTo: string | null) {
+    if (!selected) return;
+    setError(null);
+    const { message } = await sendSticker(
+      selected.id,
+      sticker.id,
+      crypto.randomUUID(),
+      replyTo,
+    );
+    setMessages((prev) =>
+      prev.some((m) => m.id === message.id)
+        ? prev.map((m) => (m.id === message.id ? message : m))
+        : [...prev, message],
+    );
+    void mutateList();
   }
 
   async function handlePinMessage(message: Message, pinned: boolean) {
@@ -1155,6 +1180,7 @@ function Inbox() {
           onDeleteMessage={handleDeleteMessage}
           onPinMessage={handlePinMessage}
           onReactMessage={handleReactMessage}
+          onSendSticker={handleSendSticker}
           unreadMark={unreadMark}
           mentionAnchor={mentionAnchor}
           ownJids={ownJids}
@@ -1197,6 +1223,7 @@ function Inbox() {
                 onDeleteMessage={handleDeleteMessage}
                 onPinMessage={handlePinMessage}
                 onReactMessage={handleReactMessage}
+                onSendSticker={handleSendSticker}
                 unreadMark={unreadMark}
                 mentionAnchor={mentionAnchor}
                 ownJids={ownJids}
