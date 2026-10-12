@@ -141,6 +141,10 @@ func (s *Server) Handler() http.Handler {
 
 					r.Get("/conversations", s.handleListConversations)
 					r.Get("/conversations/counts", s.handleConversationCounts)
+					// Opening a chat with a number read out of somebody
+					// else's message. Under the account because that is what
+					// decides which of our numbers does the writing.
+					r.Post("/chats/resolve", s.handleResolveNumberChat)
 
 					// The two panels beside Chat. Status is stored like any
 					// other message and read back grouped by who posted it;

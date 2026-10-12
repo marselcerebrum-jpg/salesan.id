@@ -797,6 +797,23 @@ export interface MemberBreakdown {
  * application, so a row of the breakdown and the card above it can never mean
  * two different things.
  */
+/**
+ * Where a chat with a bare number landed.
+ *
+ * The same shape a private reply resolves to, because the browser needs the
+ * same three things either way: the thread, the number that owns it, and
+ * whether it was already there.
+ */
+export interface NumberTarget {
+  conversation_id: string;
+  account_id: string;
+  application_id: string | null;
+  name: string;
+  phone_number: string;
+  /** False when this call is what created the thread. */
+  existing: boolean;
+}
+
 export interface ApplicationPerformance {
   application: AppRef;
   summary: DashboardSummary;

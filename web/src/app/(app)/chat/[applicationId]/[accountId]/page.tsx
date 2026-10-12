@@ -78,6 +78,7 @@ import type {
   MessageHiddenPayload,
   MessageNewPayload,
   MessageStatusPayload,
+  NumberTarget,
   PresenceViewer,
   PresenceViewersPayload,
   PrivateReplyTarget,
@@ -661,6 +662,23 @@ function Inbox() {
   }
 
   /**
+   * Follows a number the operator tapped inside a message.
+   *
+   * The list is refreshed first for the same reason as above: the thread may
+   * not have existed a moment ago. A newly created one is called out, because
+   * that is a row appearing in the inbox and the operator should know they
+   * put it there rather than find it later and wonder.
+   */
+  function handleNumberChatOpened(target: NumberTarget) {
+    void mutateList();
+    void mutateCounts();
+    setSelectedId(target.conversation_id);
+    if (!target.existing) {
+      setSyncNote(`Percakapan baru dengan +${target.phone_number} dibuka.`);
+    }
+  }
+
+  /**
    * Re-sends a message into other conversations.
    *
    * A partial result is reported rather than swallowed: forwarding to six
@@ -1214,6 +1232,7 @@ function Inbox() {
           onConversationChange={handleConversationChange}
           onConversationRemoved={handleConversationRemoved}
           onPrivateReplySent={handlePrivateReplySent}
+          onNumberChatOpened={handleNumberChatOpened}
           viewers={selected ? othersViewing[selected.id] : undefined}
         />
         )}
@@ -1257,6 +1276,7 @@ function Inbox() {
                 onConversationChange={handleConversationChange}
                 onConversationRemoved={handleConversationRemoved}
                 onPrivateReplySent={handlePrivateReplySent}
+                onNumberChatOpened={handleNumberChatOpened}
                 viewers={othersViewing[selected.id]}
               />
             </div>

@@ -36,6 +36,7 @@ import { applyListBreak } from '@/components/chat/listcontinue';
 import { DaySeparator, MessageBubble } from '@/components/chat/MessageBubble';
 import type { MessageAction } from '@/components/chat/MessageMenu';
 import { PollComposer } from '@/components/chat/PollComposer';
+import { NumberChatDialog, type NumberPick } from '@/components/chat/NumberChatDialog';
 import { PrivateReplyDialog } from '@/components/chat/PrivateReplyDialog';
 import { QuickReplyMenu, slashQuery } from '@/components/chat/QuickReplyMenu';
 import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
@@ -56,6 +57,7 @@ import type {
   Conversation,
   GroupMember,
   Message,
+  NumberTarget,
   PresenceViewer,
   PrivateReplyTarget,
   QuickReply,
@@ -128,6 +130,13 @@ interface MessageThreadProps {
    */
   onPrivateReplySent: (target: PrivateReplyTarget) => void;
   /**
+   * Called after a number written inside a message has been turned into a
+   * chat, with the thread it resolved to. Same arrangement as the private
+   * reply above: the thread exists either way, and following it is the page's
+   * decision rather than this component's.
+   */
+  onNumberChatOpened: (target: NumberTarget) => void;
+  /**
    * Colleagues who have this same thread open right now, on any browser using
    * this number. Shown so two people do not answer the same customer at once.
    */
@@ -161,6 +170,7 @@ export function MessageThread({
   onConversationChange,
   onConversationRemoved,
   onPrivateReplySent,
+  onNumberChatOpened,
 }: MessageThreadProps) {
   const [draft, setDraft] = useState('');
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -182,6 +192,7 @@ export function MessageThread({
   const [forwarding, setForwarding] = useState<Message | null>(null);
   // The group message being answered in private, or null.
   const [privateReply, setPrivateReply] = useState<Message | null>(null);
+  const [numberPick, setNumberPick] = useState<NumberPick | null>(null);
   // Whether the slash menu is showing. Separate from the draft so Escape can
   // dismiss it without also having to clear what was typed.
   const [slashOpen, setSlashOpen] = useState(false);
@@ -376,7 +387,7 @@ export function MessageThread({
     return byUser;
   }, [memberData]);
 
-  // Falls back to null so MentionText shows the number — a readable fallback
+  // Falls back to null so MessageText shows the number — a readable fallback
   // beats an empty highlight.
   const resolveMention = useCallback(
     (jid: string) => memberNames.get(jid.split('@')[0]?.split(':')[0] ?? '') ?? null,
@@ -848,6 +859,7 @@ export function MessageThread({
                     senderMember={senderMember(message)}
                     onJumpToQuoted={jumpToMessage}
                     loadedMessageIds={loadedMessageIds}
+                    onPickNumber={(phone, written) => setNumberPick({ phone, written })}
                     // A reaction is a send like any other, so it is offered
                     // only while the account is actually connected.
                     onReact={
@@ -1107,6 +1119,17 @@ export function MessageThread({
         onClose={() => setPrivateReply(null)}
         onSent={onPrivateReplySent}
       />
+
+      {/* The account is this thread's own, which is the only sensible answer:
+          a number read here is written to by the number that received it. */}
+      {conversation ? (
+        <NumberChatDialog
+          pick={numberPick}
+          accountId={conversation.account_id}
+          onClose={() => setNumberPick(null)}
+          onOpened={onNumberChatOpened}
+        />
+      ) : null}
 
       <ForwardDialog
         message={forwarding}

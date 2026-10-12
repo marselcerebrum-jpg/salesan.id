@@ -34,6 +34,7 @@ import type {
   MergeResult,
   MediaLink,
   Message,
+  NumberTarget,
   OperationalRole,
   OrgMember,
   PrivateReplyTarget,
@@ -633,6 +634,21 @@ export const sendPrivateReply = (messageId: string, body: string) =>
     `/messages/${messageId}/private-reply`,
     { method: 'POST', body: JSON.stringify({ body }) },
   );
+
+/**
+ * Finds, or opens, the chat for a number read inside somebody's message.
+ *
+ * The digits go over exactly as they were written. Which thread that is, and
+ * whether it already existed, are the server's answers: it normalises the
+ * number with the same rule the contact import uses and asks WhatsApp whether
+ * anybody is registered there. A browser that decided either would be guessing
+ * which customer to write to.
+ */
+export const resolveNumberChat = (accountId: string, phone: string) =>
+  request<{ target: NumberTarget }>(`/accounts/${accountId}/chats/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
 
 /* --- media ---------------------------------------------------------------- */
 

@@ -23,7 +23,7 @@ import { useRef, useState, type ComponentType } from 'react';
 import { useAutoGrow } from '@/components/chat/autogrow';
 import { applyListBreak } from '@/components/chat/listcontinue';
 import { MediaAttachment } from '@/components/chat/MediaAttachment';
-import { MentionText } from '@/components/chat/MentionText';
+import { MessageText } from '@/components/chat/MessageText';
 import { MessageMenu, type MessageAction } from '@/components/chat/MessageMenu';
 import { PollBubble } from '@/components/chat/PollBubble';
 import { ReactionButton, ReactionChips, ReactionPicker } from '@/components/chat/Reactions';
@@ -109,6 +109,7 @@ export function MessageBubble({
   onReact,
   onJumpToQuoted,
   loadedMessageIds,
+  onPickNumber,
 }: {
   message: Message;
   showSender: boolean;
@@ -137,6 +138,8 @@ export function MessageBubble({
   onReact?: (message: Message, emoji: string) => void;
   /** Scrolls the thread to the message this one is answering. */
   onJumpToQuoted?: (messageId: string) => void;
+  /** Opens the menu for a phone number found in the text. */
+  onPickNumber?: (phone: string, written: string) => void;
   /**
    * Which messages the thread currently holds.
    *
@@ -338,11 +341,12 @@ export function MessageBubble({
           // The trailing pad reserves room for the time, which WhatsApp floats
           // into the last line rather than putting on a line of its own.
           <p className="break-words whitespace-pre-wrap">
-            <MentionText
+            <MessageText
               text={text}
               mentionedJids={message.mentioned_jids ?? []}
               ownJids={ownJids}
               resolveName={resolveMention}
+              onPickNumber={onPickNumber}
             />
             <span className="inline-block w-[68px]" aria-hidden />
           </p>
