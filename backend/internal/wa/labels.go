@@ -610,7 +610,7 @@ func (s *Session) handleAppStateSyncError(evt *events.AppStateSyncError) {
 		if !act {
 			s.log.Info("collection still wedged at the same patch; not reading it again yet",
 				"patch", evt.Name, "wedged_at", w.patch, "attempts", w.attempts,
-				"next_in", w.wait(now).Round(time.Second))
+				"next_in", w.wait(now).Round(time.Second).String())
 			return
 		}
 	}
@@ -936,6 +936,10 @@ func (s *Session) recordLabelReadability(ctx context.Context, outcome appStateOu
 		reason = "menunggu HP mengirim ulang koleksi label"
 	case slices.Contains(outcome.Stale, name):
 		reason = "koleksi label tidak dapat disegarkan; set lama masih dipakai"
+	case slices.Contains(outcome.Wedged, name):
+		// Reached only when the wedge is recorded but its patch version is
+		// unknown, since the case above handles every wedge we can name.
+		reason = "koleksi label tersangkut di data WhatsApp; menunggu jeda berikutnya"
 	default:
 		// `regular` is neither OK nor named anywhere: nothing to say about it.
 		return

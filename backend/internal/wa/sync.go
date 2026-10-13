@@ -362,6 +362,26 @@ func (s *Session) syncAppState(ctx context.Context, force bool) appStateOutcome 
 			return out
 		}
 
+		// A wedged collection whose turn has not come is left alone entirely.
+		//
+		// This is the read that was doing the damage, and it is not the cheap
+		// one it looks like. An incremental read of a collection sitting on
+		// version zero is turned into a full one by whatsmeow — version zero
+		// forces a snapshot — so the ten minute safety net was downloading the
+		// same unverifiable snapshot six times an hour, for as long as the
+		// account stayed wedged.
+		//
+		// A forced pass still reads: the operator pressed Sinkron and is owed
+		// an attempt. It just never reaches the destructive half below.
+		if !force {
+			if w, ok := s.wedgedAt(name); ok && w.patch > 0 && !w.due(time.Now()) {
+				s.log.Debug("skipping a wedged collection until its turn",
+					"patch", name, "wedged_at", w.patch, "next_in", w.wait(time.Now()).String())
+				out.Wedged = append(out.Wedged, string(name))
+				continue
+			}
+		}
+
 		// 1. Incremental: cheap, and preserves the stored version.
 		lastErr := s.client.FetchAppState(ctx, name, false, false)
 		if lastErr == nil {
@@ -441,6 +461,14 @@ type appStateOutcome struct {
 	// Stale names collections that could not be refreshed but kept usable
 	// state. Reads may lag; writes still work. Deliberately not an error.
 	Stale []string
+	// Wedged names collections skipped because WhatsApp's own data fails at a
+	// patch version already watched fail, and the interval has not elapsed.
+	//
+	// Kept apart from Stale rather than folded into it: Stale promises the old
+	// set is still usable and writable, and on a collection sitting at version
+	// zero neither is true. Saying so under the wrong name is how a number ends
+	// up reported as merely behind for three weeks.
+	Wedged []string
 	// Errors holds failures with no path forward.
 	Errors []error
 }
