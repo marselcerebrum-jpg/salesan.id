@@ -129,6 +129,19 @@ func (r *Repo) contactsByApplication(
 }
 
 // applicationsInScope lists the applications this view covers.
+// ApplicationsInScope lists the applications a report may be split across.
+//
+// Exported for the exports, which fan out over it and run the screen's own
+// query once per application. Asking the same query with the application
+// narrowed is deliberately slower than writing one grouped query: it is the
+// only way the file and the screen cannot disagree, and these numbers are
+// reported upward.
+func (r *Repo) ApplicationsInScope(
+	ctx context.Context, sc Scope, f models.AnalyticsFilter,
+) ([]models.AppRef, error) {
+	return r.applicationsInScope(ctx, sc, f)
+}
+
 func (r *Repo) applicationsInScope(
 	ctx context.Context, sc Scope, f models.AnalyticsFilter,
 ) ([]models.AppRef, error) {

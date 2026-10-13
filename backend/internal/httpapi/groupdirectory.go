@@ -439,7 +439,31 @@ type xlsxIS struct {
 	T string `xml:"t"`
 }
 
+// xlsxSheet is one tab of a workbook.
+type xlsxSheet struct {
+	Name   string
+	Header []string
+	Rows   [][]string
+}
+
 func writeXLSX(w http.ResponseWriter, sheet string, header []string, rows [][]string) error {
+	return writeXLSXSheets(w, []xlsxSheet{{Name: sheet, Header: header, Rows: rows}})
+}
+
+// writeXLSXSheets writes a workbook with one tab per entry.
+//
+// Hand-rolled, like the single-sheet version it grew out of, because the only
+// alternative was a new dependency for four XML parts. The parts are small but
+// they have to agree with each other: a sheet listed in workbook.xml with no
+// matching relationship, or a worksheet part missing from [Content_Types].xml,
+// gives a file Excel refuses to open at all rather than one that opens wrong.
+// So all four are generated from one loop over one slice.
+func writeXLSXSheets(w http.ResponseWriter, sheets []xlsxSheet) error {
+	if len(sheets) == 0 {
+		sheets = []xlsxSheet{{Name: "Sheet1"}}
+	}
+	names := sheetNames(sheets)
+
 	zw := zip.NewWriter(w)
 
 	put := func(name, body string) error {
@@ -451,13 +475,17 @@ func writeXLSX(w http.ResponseWriter, sheet string, header []string, rows [][]st
 		return err
 	}
 
-	if err := put("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`+
-		`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`+
-		`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`+
-		`<Default Extension="xml" ContentType="application/xml"/>`+
-		`<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`+
-		`<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`+
-		`</Types>`); err != nil {
+	types := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+		`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+		`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+		`<Default Extension="xml" ContentType="application/xml"/>` +
+		`<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`
+	for i := range sheets {
+		types += fmt.Sprintf(
+			`<Override PartName="/xl/worksheets/sheet%d.xml" `+
+				`ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`, i+1)
+	}
+	if err := put("[Content_Types].xml", types+`</Types>`); err != nil {
 		return err
 	}
 
@@ -468,22 +496,35 @@ func writeXLSX(w http.ResponseWriter, sheet string, header []string, rows [][]st
 		return err
 	}
 
-	if err := put("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`+
-		`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" `+
-		`xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`+
-		`<sheets><sheet name="`+xmlEscape(sheet)+`" sheetId="1" r:id="rId1"/></sheets>`+
-		`</workbook>`); err != nil {
+	book := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+		`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ` +
+		`xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>`
+	rels := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+		`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+	for i := range sheets {
+		book += fmt.Sprintf(`<sheet name="%s" sheetId="%d" r:id="rId%d"/>`, xmlEscape(names[i]), i+1, i+1)
+		rels += fmt.Sprintf(`<Relationship Id="rId%d" `+
+			`Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" `+
+			`Target="worksheets/sheet%d.xml"/>`, i+1, i+1)
+	}
+	if err := put("xl/workbook.xml", book+`</sheets></workbook>`); err != nil {
+		return err
+	}
+	if err := put("xl/_rels/workbook.xml.rels", rels+`</Relationships>`); err != nil {
 		return err
 	}
 
-	if err := put("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`+
-		`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`+
-		`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`+
-		`</Relationships>`); err != nil {
-		return err
+	for i, sheet := range sheets {
+		if err := writeXLSXSheet(zw, i+1, sheet); err != nil {
+			return err
+		}
 	}
+	return zw.Close()
+}
 
-	sheetFile, err := zw.Create("xl/worksheets/sheet1.xml")
+// writeXLSXSheet streams one worksheet part.
+func writeXLSXSheet(zw *zip.Writer, index int, sheet xlsxSheet) error {
+	sheetFile, err := zw.Create(fmt.Sprintf("xl/worksheets/sheet%d.xml", index))
 	if err != nil {
 		return err
 	}
@@ -493,11 +534,11 @@ func writeXLSX(w http.ResponseWriter, sheet string, header []string, rows [][]st
 	}
 
 	enc := xml.NewEncoder(sheetFile)
-	write := func(index int, values []string) error {
-		row := xlsxRow{R: index, Cells: make([]xlsxCell, 0, len(values))}
+	write := func(rowIndex int, values []string) error {
+		row := xlsxRow{R: rowIndex, Cells: make([]xlsxCell, 0, len(values))}
 		for i, v := range values {
 			row.Cells = append(row.Cells, xlsxCell{
-				R:  fmt.Sprintf("%s%d", columnName(i), index),
+				R:  fmt.Sprintf("%s%d", columnName(i), rowIndex),
 				T:  "inlineStr",
 				IS: xlsxIS{T: v},
 			})
@@ -505,22 +546,83 @@ func writeXLSX(w http.ResponseWriter, sheet string, header []string, rows [][]st
 		return enc.Encode(row)
 	}
 
-	if err := write(1, header); err != nil {
-		return err
-	}
-	for i, row := range rows {
-		if err := write(i+2, row); err != nil {
+	next := 1
+	if len(sheet.Header) > 0 {
+		if err := write(next, sheet.Header); err != nil {
 			return err
 		}
+		next++
+	}
+	for _, row := range sheet.Rows {
+		if err := write(next, row); err != nil {
+			return err
+		}
+		next++
 	}
 	if err := enc.Flush(); err != nil {
 		return err
 	}
+	_, err = sheetFile.Write([]byte(`</sheetData></worksheet>`))
+	return err
+}
 
-	if _, err := sheetFile.Write([]byte(`</sheetData></worksheet>`)); err != nil {
-		return err
+// forbiddenInSheetName are the characters a spreadsheet will not accept in a
+// tab name.
+const forbiddenInSheetName = `:\/?*[]`
+
+// sheetNames makes every tab name one a spreadsheet will accept.
+//
+// Three rules, and breaking any of them gives a file that will not open: those
+// characters are forbidden, the name may not exceed thirty-one characters, and
+// two tabs may not share a name. The last one is the one that bites, because
+// the first two make it likely: "JADIBUMN SAVE KONTAK 1" and "JADIBUMN SAVE
+// KONTAK 2" are the same name once truncated, and the application names here
+// are long enough that this is the ordinary case rather than the odd one.
+func sheetNames(sheets []xlsxSheet) []string {
+	out := make([]string, len(sheets))
+	taken := map[string]bool{}
+
+	for i, s := range sheets {
+		name := strings.Map(func(r rune) rune {
+			if strings.ContainsRune(forbiddenInSheetName, r) {
+				return '-'
+			}
+			return r
+		}, strings.TrimSpace(s.Name))
+		if name == "" {
+			name = fmt.Sprintf("Sheet%d", i+1)
+		}
+		name = truncateRunes(name, 31)
+
+		if taken[strings.ToLower(name)] {
+			// Numbered from two, with room made for the suffix rather than it
+			// being appended past the limit.
+			for n := 2; ; n++ {
+				suffix := fmt.Sprintf(" (%d)", n)
+				candidate := truncateRunes(name, 31-len([]rune(suffix))) + suffix
+				if !taken[strings.ToLower(candidate)] {
+					name = candidate
+					break
+				}
+			}
+		}
+		taken[strings.ToLower(name)] = true
+		out[i] = name
 	}
-	return zw.Close()
+	return out
+}
+
+// truncateRunes cuts by character rather than by byte, so a name cannot end in
+// half a letter.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if max <= 0 {
+		return ""
+	}
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
 }
 
 // columnName turns 0 into "A" and 26 into "AA", which is how a spreadsheet

@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +15,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/salesan/omnichannel/backend/internal/analytics"
+	"github.com/salesan/omnichannel/backend/internal/models"
+	"github.com/salesan/omnichannel/backend/internal/repository"
 )
 
 // Status Label: Cold, Warm and Hot.
@@ -170,73 +175,55 @@ func (s *Server) handleExportLabelCategory(w http.ResponseWriter, r *http.Reques
 	}
 	stamp := time.Now().Format("2006-01-02")
 
-	var header []string
-	var rows [][]string
+	// One group per application, which is what the file is asked to be split
+	// by. The screen above it is already narrowed to one brand at a time, so a
+	// single flat table was the one shape nobody could use: a report that goes
+	// upward is read brand by brand, and a column of mixed brands has to be
+	// taken apart by hand before it answers anything.
+	apps, err := s.repo.ApplicationsInScope(r.Context(), sc, f)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	// A reader who has already drilled into one brand gets that brand, not all
+	// of them. ApplicationsInScope answers "which may I see", not "which did I
+	// ask for", and the two differ exactly here.
+	if f.ApplicationID != nil {
+		apps = slices.DeleteFunc(apps, func(a models.AppRef) bool { return a.ID != *f.ApplicationID })
+	}
+	if len(apps) == 0 {
+		writeError(w, http.StatusNotFound, "no_application",
+			"Tidak ada aplikasi dalam jangkauan Anda untuk dilaporkan")
+		return
+	}
 
-	if shape == "daily" {
-		days, err := s.repo.LabelCategoryDaily(r.Context(), sc, f)
-		if err != nil {
-			writeAppError(w, err)
-			return
-		}
-		header = []string{"tanggal", "cold", "warm", "hot", "total"}
-		for _, d := range days {
-			rows = append(rows, []string{
-				d.Day, strconv.Itoa(d.Cold), strconv.Itoa(d.Warm), strconv.Itoa(d.Hot),
-				strconv.Itoa(d.Cold + d.Warm + d.Hot),
-			})
-		}
+	// Checked once, before any brand is queried. Inside the loop it would be
+	// the same complaint repeated per application, and the first one would have
+	// already written a 400 that the rest could not take back.
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	if shape == "detail" && !slices.Contains([]string{"cold", "warm", "hot"}, category) {
+		writeError(w, http.StatusBadRequest, "invalid_category",
+			fmt.Sprintf("kategori %q tidak dikenal", category))
+		return
+	}
 
-		// The same closing row the screen shows, and for the same reason: it is
-		// not the sum of the column. A customer labelled Cold on Monday and Warm
-		// on Thursday appears on both days above, and holds one label today.
-		// Leaving it out of the file would let a spreadsheet add the column and
-		// arrive at a number of customers that does not exist.
-		now, err := s.repo.LabelCategorySummary(r.Context(), sc, f)
+	header := labelCategoryHeader(shape)
+	groups := make([]xlsxSheet, 0, len(apps))
+
+	for _, app := range apps {
+		// The screen's own query, asked once per brand rather than rewritten as
+		// one grouped query. Slower by the number of brands, and the only way
+		// the file and the screen cannot disagree.
+		scoped := f
+		id := app.ID
+		scoped.ApplicationID = &id
+
+		rows, err := s.labelCategoryRows(r.Context(), sc, scoped, shape, r.URL.Query())
 		if err != nil {
 			writeAppError(w, err)
 			return
 		}
-		rows = append(rows, []string{
-			"total (kondisi sekarang)",
-			strconv.Itoa(now.Cold), strconv.Itoa(now.Warm), strconv.Itoa(now.Hot),
-			strconv.Itoa(now.Cold + now.Warm + now.Hot),
-		})
-	} else if shape == "summary" {
-		moves, err := s.repo.LabelCategoryTransitions(r.Context(), sc, f)
-		if err != nil {
-			writeAppError(w, err)
-			return
-		}
-		header = []string{"tanggal", "dari", "ke", "perpindahan", "customer"}
-		for _, m := range moves {
-			rows = append(rows, []string{
-				m.Day, labelCategoryName(m.From), labelCategoryName(m.To),
-				strconv.Itoa(m.Count), strconv.Itoa(m.Contacts),
-			})
-		}
-	} else {
-		category := strings.TrimSpace(r.URL.Query().Get("category"))
-		// No paging on an export. Somebody who asked for the report wants the
-		// report, and handing them the first fifty rows of it silently is worse
-		// than making them wait.
-		contacts, _, err := s.repo.LabelCategoryContacts(
-			r.Context(), sc, f, category, r.URL.Query().Get("q"), 500, 0)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_category", err.Error())
-			return
-		}
-		header = []string{
-			"nomor_whatsapp", "nama", "kategori", "label_terakhir",
-			"jumlah_perubahan", "tanggal_perubahan",
-		}
-		for _, c := range contacts {
-			rows = append(rows, []string{
-				c.Phone, c.Name, labelCategoryName(c.Category), c.LabelName,
-				strconv.Itoa(c.ChangeCount),
-				c.ChangedAt.In(analytics.Jakarta).Format("2006-01-02 15:04"),
-			})
-		}
+		groups = append(groups, xlsxSheet{Name: app.Name, Header: header, Rows: rows})
 	}
 
 	base := fmt.Sprintf("status-label-%s-%s", shape, stamp)
@@ -246,21 +233,120 @@ func (s *Server) handleExportLabelCategory(w http.ResponseWriter, r *http.Reques
 			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment",
 			map[string]string{"filename": base + ".xlsx"}))
-		if err := writeXLSX(w, "Status Label", header, rows); err != nil {
+		if err := writeXLSXSheets(w, groups); err != nil {
 			s.log.Error("write xlsx", "err", err)
 		}
 		return
 	}
 
+	// A CSV has no tabs, so the split becomes a first column instead. Its own
+	// column rather than a banner row between blocks: a spreadsheet can filter,
+	// group or pivot by a column, and can do nothing at all with a banner.
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment",
 		map[string]string{"filename": base + ".csv"}))
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
-	_ = cw.Write(header)
-	for _, row := range rows {
-		_ = cw.Write(row)
+	_ = cw.Write(append([]string{"aplikasi"}, header...))
+	for _, g := range groups {
+		for _, row := range g.Rows {
+			_ = cw.Write(append([]string{g.Name}, row...))
+		}
 	}
+}
+
+// labelCategoryHeader is the column list for one report shape.
+//
+// Apart from the row builder below so the two cannot drift: a header with one
+// more column than its rows produces a file that looks right until somebody
+// sorts it.
+func labelCategoryHeader(shape string) []string {
+	switch shape {
+	case "daily":
+		return []string{"tanggal", "cold", "warm", "hot", "total"}
+	case "detail":
+		return []string{
+			"nomor_whatsapp", "nama", "kategori", "label_terakhir",
+			"jumlah_perubahan", "tanggal_perubahan",
+		}
+	default:
+		return []string{"tanggal", "dari", "ke", "perpindahan", "customer"}
+	}
+}
+
+// labelCategoryRows builds one application's rows for one report shape.
+func (s *Server) labelCategoryRows(
+	ctx context.Context,
+	sc repository.Scope,
+	f models.AnalyticsFilter,
+	shape string,
+	q url.Values,
+) ([][]string, error) {
+	var rows [][]string
+
+	switch shape {
+	case "daily":
+		days, err := s.repo.LabelCategoryDaily(ctx, sc, f)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range days {
+			rows = append(rows, []string{
+				d.Day, strconv.Itoa(d.Cold), strconv.Itoa(d.Warm), strconv.Itoa(d.Hot),
+				strconv.Itoa(d.Cold + d.Warm + d.Hot),
+			})
+		}
+
+		// The same closing row the screen shows, and for the same reason: it is
+		// not the sum of the column. A customer labelled Cold on Monday and
+		// Warm on Thursday appears on both days above, and holds one label
+		// today. Leaving it out would let a spreadsheet add the column and
+		// arrive at a number of customers that does not exist.
+		//
+		// Per application now, which is the point: a grand total across brands
+		// would be the one number in the file nobody could check.
+		now, err := s.repo.LabelCategorySummary(ctx, sc, f)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, []string{
+			"total (kondisi sekarang)",
+			strconv.Itoa(now.Cold), strconv.Itoa(now.Warm), strconv.Itoa(now.Hot),
+			strconv.Itoa(now.Cold + now.Warm + now.Hot),
+		})
+
+	case "detail":
+		// No paging on an export. Somebody who asked for the report wants the
+		// report, and handing them the first fifty rows of it silently is worse
+		// than making them wait. The cap is per application rather than across
+		// all of them, so a busy brand cannot crowd out a quiet one.
+		contacts, _, err := s.repo.LabelCategoryContacts(
+			ctx, sc, f, strings.TrimSpace(q.Get("category")), q.Get("q"), 500, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range contacts {
+			rows = append(rows, []string{
+				c.Phone, c.Name, labelCategoryName(c.Category), c.LabelName,
+				strconv.Itoa(c.ChangeCount),
+				c.ChangedAt.In(analytics.Jakarta).Format("2006-01-02 15:04"),
+			})
+		}
+
+	default:
+		moves, err := s.repo.LabelCategoryTransitions(ctx, sc, f)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range moves {
+			rows = append(rows, []string{
+				m.Day, labelCategoryName(m.From), labelCategoryName(m.To),
+				strconv.Itoa(m.Count), strconv.Itoa(m.Contacts),
+			})
+		}
+	}
+
+	return rows, nil
 }
 
 // labelCategoryName is how a category is written for a human.

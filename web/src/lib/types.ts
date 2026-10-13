@@ -1548,6 +1548,14 @@ export interface SyncResult {
    */
   app_state_recovering?: string[];
   /**
+   * Why Sinkron did not read the labels, when that is the reason.
+   *
+   * Present only on a number whose label data WhatsApp itself cannot verify.
+   * Shown instead of the usual "N label" line, because on those numbers that
+   * line reads "0 label" and explains nothing.
+   */
+  label_wedge?: string;
+  /**
    * Set only when app-state could not be read AND recovery could not even be
    * requested. Labels and per-chat read state are genuinely stale then.
    */

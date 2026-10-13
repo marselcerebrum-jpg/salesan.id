@@ -47,6 +47,15 @@ type SyncResult struct {
 	// AppStateStale lists collections that could not be refreshed but kept
 	// usable state: reads may lag, writes still work.
 	AppStateStale []string `json:"app_state_stale,omitempty"`
+	// LabelWedge explains, in a sentence, why pressing Sinkron did not read the
+	// labels — when that is the reason.
+	//
+	// This exists because the button had become indistinguishable from a broken
+	// one. On a wedged number the only honest thing Sinkron can do is refuse
+	// the destructive half of the repair, so it reads nothing, reports "0
+	// label", and leaves the operator to press it again. Five times in four
+	// minutes, on the day this was written.
+	LabelWedge string `json:"label_wedge,omitempty"`
 	// AppStateError is set only when app-state could not be read AND the
 	// recovery request could not even be sent. Labels and per-chat read state
 	// live there, so a non-empty value means those two are genuinely stale.
@@ -113,6 +122,13 @@ func (m *Manager) SyncAccount(ctx context.Context, accountID uuid.UUID, opts Syn
 	outcome := s.syncAppState(ctx, true)
 	res.AppStateRecovering = outcome.Recovering
 	res.AppStateStale = outcome.Stale
+	if w, ok := s.wedgedAt(appstate.WAPatchRegular); ok && w.patch > 0 {
+		res.LabelWedge = fmt.Sprintf(
+			"Label tidak terbaca: data label di WhatsApp sendiri tidak konsisten pada patch v%d. "+
+				"Memasangkan ulang HP dan menekan Sinkron lagi tidak menolong — keduanya sudah dicoba "+
+				"dan gagal di titik yang sama. Sistem mencoba sendiri begitu WhatsApp menyusun ulang datanya.",
+			w.patch)
+	}
 	if len(outcome.Errors) > 0 {
 		err := errors.Join(outcome.Errors...)
 		s.log.Warn("app state sync failed", "err", err)

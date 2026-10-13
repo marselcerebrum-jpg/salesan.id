@@ -1080,6 +1080,13 @@ function Inbox() {
       ];
       if (result.history_pending) parts.push('riwayat menyusul');
       setSyncNote(`${result.window_days} hari terakhir · ${parts.join(' · ')}`);
+      // Said where a failure is said, not in the success line beside "0 label".
+      //
+      // Sinkron on a wedged number reads nothing and can read nothing, and
+      // until this was here the only evidence of that was a label count of
+      // zero — which looks exactly like a button that did not work, and was
+      // pressed five times in four minutes for that reason.
+      if (result.label_wedge) setError(result.label_wedge);
       void mutateList();
       void mutateCounts();
       if (selectedId) void loadMessages(selectedId);
