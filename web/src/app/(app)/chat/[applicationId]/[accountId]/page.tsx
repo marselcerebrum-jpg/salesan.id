@@ -170,7 +170,15 @@ function Inbox() {
   // arriving here already means the reader is allowed to open it.
   const deepLinkConversation = search.get('c');
   const deepLinkMessage = search.get('m');
-  const [deepLinked, setDeepLinked] = useState<Conversation | null>(null);
+  /**
+   * A thread the loaded list does not contain, held so it stays open.
+   *
+   * Not only a deep link any more. A conversation created a moment ago has no
+   * message to sort on, so the inbox order puts it below every active chat and
+   * off the end of the page — which is exactly what happens to a chat opened
+   * from a number somebody wrote in a message.
+   */
+  const [offList, setOffList] = useState<Conversation | null>(null);
   const [deepLinkError, setDeepLinkError] = useState<string | null>(null);
 
   // Which of the three panels the left column is showing. Not a route: the
@@ -278,11 +286,12 @@ function Inbox() {
       conversations.find((c) => c.id === selectedId) ??
       // Still open even once the filter has stopped matching it.
       (reading && reading.conversation.id === selectedId ? reading.conversation : null) ??
-      // A deep-linked thread may sit outside the loaded page of the list — an
-      // older conversation still waiting for a reply, for instance. It is
-      // fetched on its own so the link lands rather than silently doing nothing.
-      (deepLinked && deepLinked.id === selectedId ? deepLinked : null),
-    [conversations, selectedId, deepLinked, reading],
+      // A thread can sit outside the loaded page of the list: an older
+      // conversation still waiting for a reply, or one created seconds ago that
+      // has no message to sort on yet. It is fetched on its own so the thread
+      // opens rather than silently doing nothing.
+      (offList && offList.id === selectedId ? offList : null),
+    [conversations, selectedId, offList, reading],
   );
 
   // A filter the operator changed on purpose should filter. Holding a row is
@@ -388,6 +397,30 @@ function Inbox() {
     }
   }, []);
 
+  /**
+   * Opens a thread by id, whether or not the inbox list has it.
+   *
+   * Three things reach a thread without the operator pressing its row: a deep
+   * link, a private reply, and a number tapped inside a message. All three can
+   * name a thread the loaded list does not contain, so all three come through
+   * here instead of setting the id and hoping the row turns up. Setting the id
+   * alone was the bug: the thread stayed shut, and even once it opened it would
+   * have shown the previous conversation's messages, because nothing but
+   * openConversation clears and loads them.
+   */
+  async function openConversationById(conversationId: string) {
+    const inList = conversations.find((c) => c.id === conversationId);
+    if (inList) {
+      await openConversation(inList);
+      return;
+    }
+    // Fetched on its own and held apart from the list, which will not return it
+    // until it has a message to sort on.
+    const conv = await getConversation(conversationId);
+    setOffList(conv);
+    await openConversation(conv);
+  }
+
   async function openConversation(conversation: Conversation) {
     setSelectedId(conversation.id);
     // Captured before the list refetches, which is what removes it.
@@ -470,18 +503,9 @@ function Inbox() {
     if (listLoading) return;
 
     setDeepLinkDone(true);
-    const inList = conversations.find((c) => c.id === deepLinkConversation);
-    if (inList) {
-      void openConversation(inList);
-      if (deepLinkMessage) setMentionAnchor(deepLinkMessage);
-      return;
-    }
-
     void (async () => {
       try {
-        const conv = await getConversation(deepLinkConversation);
-        setDeepLinked(conv);
-        await openConversation(conv);
+        await openConversationById(deepLinkConversation);
         if (deepLinkMessage) setMentionAnchor(deepLinkMessage);
       } catch {
         setDeepLinkError(
@@ -489,8 +513,8 @@ function Inbox() {
         );
       }
     })();
-    // openConversation is stable enough for this one-shot effect; re-running on
-    // its identity would re-open the thread on every list refresh.
+    // openConversationById is stable enough for this one-shot effect; re-running
+    // on its identity would re-open the thread on every list refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkConversation, deepLinkMessage, deepLinkDone, listLoading, conversations]);
 
@@ -649,11 +673,19 @@ function Inbox() {
    * The list is refreshed first because the thread may not have existed a
    * second ago; this is the ordinary case for this feature.
    */
-  function handlePrivateReplySent(target: PrivateReplyTarget) {
+  async function handlePrivateReplySent(target: PrivateReplyTarget) {
     void mutateList();
     void mutateCounts();
     if (target.account_id === accountId) {
-      setSelectedId(target.conversation_id);
+      // Caught here rather than left to the dialog: that one closes itself the
+      // moment the reply is delivered, so by now there is nowhere else for a
+      // failure to appear. The reply is sent either way; only the following of
+      // it can fail.
+      try {
+        await openConversationById(target.conversation_id);
+      } catch {
+        setError(`Balasan terkirim ke ${target.name}, tetapi chatnya tidak bisa dibuka.`);
+      }
       return;
     }
     // Defensive: the private thread is opened on the same account the group
@@ -669,10 +701,12 @@ function Inbox() {
    * that is a row appearing in the inbox and the operator should know they
    * put it there rather than find it later and wonder.
    */
-  function handleNumberChatOpened(target: NumberTarget) {
+  async function handleNumberChatOpened(target: NumberTarget) {
     void mutateList();
     void mutateCounts();
-    setSelectedId(target.conversation_id);
+    // Awaited, and allowed to throw: the dialog is still on screen, and it is
+    // the right place for "this could not be opened" to land.
+    await openConversationById(target.conversation_id);
     if (!target.existing) {
       setSyncNote(`Percakapan baru dengan +${target.phone_number} dibuka.`);
     }

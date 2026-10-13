@@ -39,8 +39,16 @@ export function NumberChatDialog({
   /** Which of our numbers would do the writing. */
   accountId: string;
   onClose: () => void;
-  /** Called once the thread is resolved, with where it is. */
-  onOpened: (target: NumberTarget) => void;
+  /**
+   * Called once the thread is resolved, with where it is.
+   *
+   * Awaited, so this dialog stays up until the room is actually open. Opening
+   * it can fail on its own — the thread is new, so the inbox list has not got
+   * it yet and it has to be fetched — and a dialog that had already closed
+   * would leave the operator looking at the chat they came from with nothing
+   * saying why.
+   */
+  onOpened: (target: NumberTarget) => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -70,7 +78,7 @@ export function NumberChatDialog({
     setError(null);
     try {
       const { target } = await resolveNumberChat(accountId, phone);
-      onOpened(target);
+      await onOpened(target);
       closeRef.current();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Chat tidak bisa dibuka.');

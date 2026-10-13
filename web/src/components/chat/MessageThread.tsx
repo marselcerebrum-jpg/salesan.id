@@ -128,14 +128,14 @@ interface MessageThreadProps {
    * the reply is already delivered either way, so this is an offer to follow
    * it, not part of sending it.
    */
-  onPrivateReplySent: (target: PrivateReplyTarget) => void;
+  onPrivateReplySent: (target: PrivateReplyTarget) => void | Promise<void>;
   /**
    * Called after a number written inside a message has been turned into a
    * chat, with the thread it resolved to. Same arrangement as the private
    * reply above: the thread exists either way, and following it is the page's
    * decision rather than this component's.
    */
-  onNumberChatOpened: (target: NumberTarget) => void;
+  onNumberChatOpened: (target: NumberTarget) => void | Promise<void>;
   /**
    * Colleagues who have this same thread open right now, on any browser using
    * this number. Shown so two people do not answer the same customer at once.
