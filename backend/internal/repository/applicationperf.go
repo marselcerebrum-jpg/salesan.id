@@ -129,6 +129,41 @@ func (r *Repo) contactsByApplication(
 }
 
 // applicationsInScope lists the applications this view covers.
+// AccountCountsByApplication says how many WhatsApp numbers each application
+// holds.
+//
+// Used by the exports to leave out applications that hold none. That is not a
+// tidying preference: this workspace has eight duplicated application rows —
+// same name, same code, one of each pair with no number attached — so a file
+// split per application would otherwise carry eight empty tabs named
+// "JADIASN (2)", "JADIBUMN (2)" and so on. An application with no number cannot
+// have label data at all, so those tabs are empty by construction rather than
+// empty by accident.
+func (r *Repo) AccountCountsByApplication(
+	ctx context.Context, workspaceID uuid.UUID,
+) (map[uuid.UUID]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		select application_id, count(*)
+		  from public.whatsapp_accounts
+		 where workspace_id = $1 and application_id is not null
+		 group by application_id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[uuid.UUID]int{}
+	for rows.Next() {
+		var id uuid.UUID
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
 // ApplicationsInScope lists the applications a report may be split across.
 //
 // Exported for the exports, which fan out over it and run the screen's own

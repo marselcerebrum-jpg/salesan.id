@@ -190,6 +190,21 @@ func (s *Server) handleExportLabelCategory(w http.ResponseWriter, r *http.Reques
 	// ask for", and the two differ exactly here.
 	if f.ApplicationID != nil {
 		apps = slices.DeleteFunc(apps, func(a models.AppRef) bool { return a.ID != *f.ApplicationID })
+	} else if counts, err := s.repo.AccountCountsByApplication(r.Context(), sc.WorkspaceID); err == nil {
+		// Applications holding no number are left out, because they cannot hold
+		// label data either. Eight of the twenty-two rows here are duplicates —
+		// same name, same code, no number on one of each pair — and without
+		// this the workbook carries eight empty tabs called "JADIASN (2)" and
+		// the like, which is worse than useless: it makes the reader doubt
+		// which of the two JADIASN tabs is theirs.
+		//
+		// Kept only when something would survive, so a workspace that has not
+		// linked a number yet still gets a file instead of a 404.
+		if kept := slices.DeleteFunc(slices.Clone(apps), func(a models.AppRef) bool {
+			return counts[a.ID] == 0
+		}); len(kept) > 0 {
+			apps = kept
+		}
 	}
 	if len(apps) == 0 {
 		writeError(w, http.StatusNotFound, "no_application",
