@@ -529,6 +529,18 @@ type LabelHealth struct {
 	// LabelCount is how many labels this number currently holds. Zero on a
 	// number that has never read its collection is the loudest signal here.
 	LabelCount int `json:"label_count"`
-	// Severity is 'sehat', 'tertinggal' or 'buta'.
+	// Severity is 'sehat', 'tertinggal', 'buta' or 'tersangkut'.
 	Severity string `json:"severity"`
+	// WedgedPatch is the patch version WhatsApp's own label data fails at,
+	// null when this number is not wedged.
+	//
+	// Carried to the browser because it is the one thing that distinguishes a
+	// problem somebody can act on from one nobody can. A number that is merely
+	// behind is repaired by waiting or by pressing Sinkron; a number wedged
+	// here is repaired by neither, and telling an operator to re-pair a phone
+	// over it costs them a QR scan and changes nothing.
+	WedgedPatch *int64 `json:"wedged_patch"`
+	// WedgedAttempts is how many reads have been made since that version was
+	// first refused.
+	WedgedAttempts int `json:"wedged_attempts"`
 }

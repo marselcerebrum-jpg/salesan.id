@@ -27,7 +27,7 @@ export function LabelHealthNotice({
   /** Opens the confirmation for rebuilding this number's collection. */
   onReset: (account: LabelHealth) => void;
 }) {
-  if (!report || report.needs_phone === 0) return null;
+  if (!report || report.needs_eyes === 0) return null;
 
   const hurt = report.accounts
     .filter((a) => a.severity !== 'sehat')
@@ -40,7 +40,7 @@ export function LabelHealthNotice({
     >
       <h2 className="flex items-center gap-2 text-sm font-semibold text-danger">
         <AlertTriangle className="size-4" aria-hidden />
-        {report.needs_phone} nomor tidak bisa membaca label dari HP
+        {report.needs_eyes} nomor tidak bisa membaca label dari WhatsApp
       </h2>
 
       {/* Two situations, two instructions, and giving the wrong one costs real
@@ -67,6 +67,23 @@ export function LabelHealthNotice({
         </p>
       ) : null}
 
+      {/* The third situation, and the only one where the honest instruction is
+          "do nothing". Said as its own paragraph rather than folded into the
+          one above, because the paragraph above ends in a button and this one
+          must not: CEREBRUM UTAMA was paired again from a clean QR on 13
+          October, with a new device and new keys, and WhatsApp refused the
+          identical patch v1176 within twenty seconds. Pressing anything here
+          costs a QR scan and changes nothing. */}
+      {report.wedged > 0 ? (
+        <p className="mt-1 text-xs text-ink-soft">
+          <strong className="text-ink">Tersangkut di data WhatsApp</strong> — datanya
+          sendiri tidak konsisten, jadi tidak ada yang bisa dikerjakan dari sisi kita.
+          Jangan pasang ulang nomornya dan jangan bangun ulang labelnya: keduanya sudah
+          dicoba dan gagal di titik yang sama. Sistem mencoba lagi sendiri dengan jeda
+          yang melebar, dan langsung mencoba begitu WhatsApp menyusun ulang datanya.
+        </p>
+      ) : null}
+
       <ul className="mt-3 space-y-1.5">
         {hurt.map((a) => (
           <li
@@ -82,7 +99,16 @@ export function LabelHealthNotice({
             {/* Never-read and merely-behind are different problems and the
                 operator treats them differently, so they are never phrased the
                 same. "0 label" is the whole story for a number that has one. */}
-            {a.severity === 'buta' ? (
+            {a.severity === 'tersangkut' ? (
+              // The patch version is on screen on purpose. It is what turns
+              // "labelnya error lagi" into a question with an answer: the same
+              // number means the same wedge, a different one means WhatsApp
+              // rebuilt its data and this is already being retried.
+              <span className="font-medium text-danger">
+                tersangkut di patch v{a.wedged_patch} · {formatStale(a.stale_hours)} ·{' '}
+                {a.wedged_attempts}x dicoba · {a.label_count} label
+              </span>
+            ) : a.severity === 'buta' ? (
               <span className="font-medium text-danger">
                 belum pernah terbaca · {a.label_count} label
               </span>

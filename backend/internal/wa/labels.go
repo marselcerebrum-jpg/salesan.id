@@ -577,10 +577,43 @@ const appStateForceBackoff = 15 * time.Minute
 // this, a label added on the phone would stay invisible until someone pressed
 // Sinkron. Requesting the plaintext copy turns that into a couple of seconds.
 func (s *Session) handleAppStateSyncError(evt *events.AppStateSyncError) {
-	s.log.Warn("app state sync failed", "patch", evt.Name, "full_sync", evt.FullSync, "err", evt.Error)
+	patch, wedged := wedgedPatch(evt.Error)
+	s.log.Warn("app state sync failed",
+		"patch", evt.Name, "full_sync", evt.FullSync, "wedged_at", patch, "err", evt.Error)
 
 	ctx, cancel := context.WithTimeout(s.mgr.rootCtx, eventTimeout)
 	defer cancel()
+
+	// A collection stuck at a patch version we have already watched fail gets
+	// left alone until its turn comes round.
+	//
+	// Nothing on this side moves that number. The snapshot is WhatsApp's, the
+	// MAC inside it is WhatsApp's, and reading it again fetches the same bytes
+	// to be refused for the same reason. What used to happen instead was a read
+	// every time the phone touched a label, plus the ten minute safety net,
+	// for as long as the account stayed wedged — which on one number was weeks.
+	//
+	// The version is the whole mechanism. When it moves, WhatsApp has rebuilt
+	// the snapshot and the next read is worth making immediately; noteWedge
+	// resets the interval on its own in that case, so nothing here has to
+	// notice.
+	if wedged {
+		now := time.Now()
+		w, act := s.noteWedge(evt.Name, patch, now)
+		if evt.Name == appstate.WAPatchRegular {
+			if err := s.mgr.repo.SaveLabelWedge(ctx, s.AccountID, repository.LabelWedge{
+				Patch: w.patch, Since: w.since, LastTry: w.lastTry, Attempts: w.attempts,
+			}); err != nil {
+				s.log.Warn("could not record the label wedge", "patch", evt.Name, "err", err)
+			}
+		}
+		if !act {
+			s.log.Info("collection still wedged at the same patch; not reading it again yet",
+				"patch", evt.Name, "wedged_at", w.patch, "attempts", w.attempts,
+				"next_in", w.wait(now).Round(time.Second))
+			return
+		}
+	}
 
 	_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSyncing, "")
 	s.broadcastSyncState(ctx, LabelSyncSyncing, "")
@@ -594,7 +627,22 @@ func (s *Session) handleAppStateSyncError(evt *events.AppStateSyncError) {
 	// write them to it. Counting the failures is what turns that endless loop
 	// into a repair.
 	failures := s.countAppStateFailure(evt.Name)
-	force := failures >= appStateForceAfter && s.mayForceAppState(evt.Name)
+
+	// Except when the read that just failed was already a full one.
+	//
+	// A full read starts from version zero and verifies WhatsApp's snapshot on
+	// its own. The version we store took no part in it, so clearing that
+	// version cannot be what fixes this — it only makes the collection
+	// unwritable until the phone answers, and spends one of the three forced
+	// attempts on a question whose answer is already known. Checked before
+	// mayForceAppState is called, because that call is what books the attempt.
+	force := false
+	if clearingCouldHelp(failures, evt.FullSync) {
+		force = s.mayForceAppState(evt.Name)
+	} else if evt.FullSync && failures == appStateForceAfter {
+		s.log.Info("full sync failed, so the stored version is not the cause; not clearing it",
+			"patch", evt.Name, "failures", failures)
+	}
 	if force {
 		s.log.Warn("collection has failed repeatedly; clearing stored state and re-reading it whole",
 			"patch", evt.Name, "failures", failures)
@@ -856,12 +904,32 @@ func (s *Session) recordLabelReadability(ctx context.Context, outcome appStateOu
 		return
 	}
 
+	var wedged *wedgeState
+	if w, ok := s.wedgedAt(appstate.WAPatchRegular); ok && w.patch > 0 {
+		wedged = &w
+	}
+
 	// Stale means the stored set is intact and still usable, which is a real
 	// difference from Recovering or a hard error — but it is still a pass that
 	// did not read anything, and six days of those is what blindness looks like
 	// from the inside.
 	reason := "koleksi label tidak dapat dibaca dari WhatsApp"
 	switch {
+	// Said before the others, and worded the way it is, because the two
+	// sentences it replaces sent somebody to re-pair a phone for nothing.
+	//
+	// "menunggu HP mengirim ulang" is an instruction to wait for the phone, and
+	// on this failure the phone is not the problem and never answers: the
+	// snapshot WhatsApp serves fails its own MAC. CEREBRUM UTAMA was paired
+	// again on 13 October with a new device and new keys, and the same patch
+	// v1176 was refused within seconds. Naming the patch version is what lets
+	// anyone recognise the second occurrence as the same one.
+	case wedged != nil:
+		reason = fmt.Sprintf(
+			"data label di WhatsApp sendiri tidak konsisten pada patch v%d, jadi tidak bisa dibaca. "+
+				"Memasangkan ulang HP tidak menolong. Akan dicoba lagi otomatis begitu WhatsApp "+
+				"menyusun ulang datanya; percobaan ke-%d sejak %s",
+			wedged.patch, wedged.attempts, wedged.since.Format("2 Jan 15:04"))
 	case len(outcome.Errors) > 0:
 		reason = errorsJoin(outcome.Errors)
 	case slices.Contains(outcome.Recovering, name):
@@ -900,6 +968,30 @@ func (s *Session) startLabelReconciler() {
 	s.mgr.wg.Add(1)
 	go func() {
 		defer s.mgr.wg.Done()
+
+		// What the last session learned, before this one reads anything.
+		//
+		// Otherwise every reconnect and every deploy hands a number that has
+		// been wedged for weeks a fresh full-speed schedule, and the backoff
+		// never gets past its first step. The cause outlives the process, so
+		// the record of it has to.
+		func() {
+			ctx, cancel := context.WithTimeout(s.mgr.rootCtx, 15*time.Second)
+			defer cancel()
+			w, err := s.mgr.repo.LoadLabelWedge(ctx, s.AccountID)
+			if err != nil {
+				s.log.Warn("could not read the recorded label wedge", "err", err)
+				return
+			}
+			if w.Patch == 0 && w.Since.IsZero() {
+				return
+			}
+			s.loadWedge(appstate.WAPatchRegular, wedgeState{
+				patch: w.Patch, since: w.Since, attempts: w.Attempts, lastTry: w.LastTry,
+			})
+			s.log.Info("label collection was already wedged when we last looked",
+				"wedged_at", w.Patch, "since", w.Since, "attempts", w.Attempts)
+		}()
 
 		ticker := time.NewTicker(labelReconcileInterval)
 		defer ticker.Stop()
@@ -972,4 +1064,18 @@ func (m *Manager) ResetLabelCollection(ctx context.Context, accountID uuid.UUID)
 		s.log.Warn("could not record the reset", "err", err)
 	}
 	return nil
+}
+
+// clearingCouldHelp reports whether throwing away the stored version is even
+// capable of fixing this failure.
+//
+// Two conditions, and the second is the one that was missing. Enough failures
+// to be sure it is wedged rather than unlucky, and a read that actually used
+// the stored version — because a full read starts from version zero, verifies
+// WhatsApp's snapshot on its own, and leaves our version out of it entirely. A
+// full read that fails has already proved the version is not the cause, so
+// deleting it buys nothing and costs a collection that cannot be written to
+// until the phone answers a question whose answer is already known.
+func clearingCouldHelp(failures int, fullSync bool) bool {
+	return failures >= appStateForceAfter && !fullSync
 }

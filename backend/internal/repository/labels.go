@@ -503,9 +503,13 @@ func (r *Repo) SetLabelSyncState(ctx context.Context, accountID uuid.UUID, state
 func (r *Repo) MarkLabelCollectionRead(ctx context.Context, accountID uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, `
 		update public.whatsapp_accounts
-		   set labels_read_at     = now(),
-		       labels_stale_since = null,
-		       labels_stale_error = null
+		   set labels_read_at        = now(),
+		       labels_stale_since    = null,
+		       labels_stale_error    = null,
+		       labels_wedged_patch   = null,
+		       labels_wedged_since   = null,
+		       labels_wedge_last_try = null,
+		       labels_wedge_attempts = 0
 		 where id = $1`, accountID)
 	return err
 }
@@ -528,6 +532,85 @@ func (r *Repo) MarkLabelCollectionStale(ctx context.Context, accountID uuid.UUID
 	return err
 }
 
+// LabelWedge is what the last session learned about an unreadable collection.
+type LabelWedge struct {
+	Patch    uint64
+	Since    time.Time
+	LastTry  time.Time
+	Attempts int
+}
+
+// LoadLabelWedge reads back the wedge a previous session recorded.
+//
+// Read on connect, so a reconnect or a deploy does not hand a number that has
+// been wedged for weeks a fresh full-speed retry schedule. The thing causing
+// the wedge outlives our process, so the record of it has to as well.
+func (r *Repo) LoadLabelWedge(ctx context.Context, accountID uuid.UUID) (LabelWedge, error) {
+	var (
+		out     LabelWedge
+		patch   *int64
+		since   *time.Time
+		lastTry *time.Time
+	)
+	err := r.pool.QueryRow(ctx, `
+		select labels_wedged_patch, labels_wedged_since,
+		       labels_wedge_last_try, labels_wedge_attempts
+		  from public.whatsapp_accounts
+		 where id = $1`, accountID).Scan(&patch, &since, &lastTry, &out.Attempts)
+	if err != nil {
+		return LabelWedge{}, mapErr(err)
+	}
+	if patch != nil && *patch > 0 {
+		out.Patch = uint64(*patch)
+	}
+	if since != nil {
+		out.Since = *since
+	}
+	if lastTry != nil {
+		out.LastTry = *lastTry
+	}
+	return out, nil
+}
+
+// SaveLabelWedge records which patch version WhatsApp's data fails at.
+//
+// `since` is held at its first value for as long as the patch version does not
+// move, which is what lets the screen say how long this has been going on. A
+// different version replaces the row wholesale: the history of one snapshot's
+// failures says nothing about the next one.
+func (r *Repo) SaveLabelWedge(ctx context.Context, accountID uuid.UUID, w LabelWedge) error {
+	var patch *int64
+	if w.Patch > 0 {
+		v := int64(w.Patch)
+		patch = &v
+	}
+	_, err := r.pool.Exec(ctx, `
+		update public.whatsapp_accounts
+		   set labels_wedged_patch   = $2,
+		       labels_wedged_since   = case
+		         when labels_wedged_patch is not distinct from $2 and labels_wedged_since is not null
+		           then labels_wedged_since
+		         else $3
+		       end,
+		       labels_wedge_last_try = $4,
+		       labels_wedge_attempts = $5
+		 where id = $1`,
+		accountID, patch, w.Since, w.LastTry, w.Attempts)
+	return err
+}
+
+// ClearLabelWedge forgets the wedge after the collection reads successfully.
+func (r *Repo) ClearLabelWedge(ctx context.Context, accountID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		update public.whatsapp_accounts
+		   set labels_wedged_patch   = null,
+		       labels_wedged_since   = null,
+		       labels_wedge_last_try = null,
+		       labels_wedge_attempts = 0
+		 where id = $1`, accountID)
+	return err
+}
+
 // labelStaleAfter is how long a number may go without reading its labels before
 // it is worth a human's attention.
 //
@@ -543,7 +626,7 @@ func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models
 	rows, err := r.pool.Query(ctx, `
 		select a.id, a.name, a.label, a.phone_number, ap.name,
 		       a.status::text, a.labels_read_at, a.labels_stale_since,
-		       a.labels_stale_error,
+		       a.labels_stale_error, a.labels_wedged_patch, a.labels_wedge_attempts,
 		       (select count(*) from public.conversation_labels l where l.account_id = a.id)
 		  from public.whatsapp_accounts a
 		  left join public.applications ap on ap.id = a.application_id
@@ -559,7 +642,7 @@ func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models
 		var h models.LabelHealth
 		if err := rows.Scan(&h.AccountID, &h.Name, &h.Label, &h.PhoneNumber,
 			&h.ApplicationName, &h.Status, &h.ReadAt, &h.StaleSince,
-			&h.Reason, &h.LabelCount); err != nil {
+			&h.Reason, &h.WedgedPatch, &h.WedgedAttempts, &h.LabelCount); err != nil {
 			return nil, err
 		}
 
@@ -570,9 +653,18 @@ func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models
 			stale := time.Since(*h.StaleSince)
 			h.StaleHours = math.Round(stale.Hours()*10) / 10
 			switch {
-			// Never read at all is its own thing, and the worst of them: the
-			// number is not behind on its labels, it has none. Two numbers sat
-			// like this for days while reporting themselves synced.
+			// Ranked above "buta", and separate from it, because the two ask
+			// opposite things of the reader. Blind means nobody has looked into
+			// it yet and the usual repairs are worth trying. Wedged means they
+			// have been tried and cannot work: WhatsApp's own data fails its own
+			// MAC, and re-pairing the phone was already proved useless on
+			// CEREBRUM UTAMA. Collapsing them is what sent somebody to scan a
+			// QR code for nothing.
+			case h.WedgedPatch != nil:
+				h.Severity = "tersangkut"
+			// Never read at all is its own thing: the number is not behind on
+			// its labels, it has none. Two numbers sat like this for days while
+			// reporting themselves synced.
 			case h.ReadAt == nil:
 				h.Severity = "buta"
 			case stale >= labelStaleAfter:

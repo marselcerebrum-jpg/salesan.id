@@ -394,21 +394,29 @@ func (s *Server) handleLabelHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var blind, stale int
+	var blind, stale, wedged int
 	for _, h := range rows {
 		switch h.Severity {
 		case "buta":
 			blind++
 		case "tertinggal":
 			stale++
+		case "tersangkut":
+			wedged++
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"accounts":    rows,
-		"blind":       blind,
-		"stale":       stale,
+		"accounts": rows,
+		"blind":    blind,
+		"stale":    stale,
+		// Counted but deliberately left out of needs_phone: a wedged number
+		// needs nothing from the phone, and the whole reason that field exists
+		// is to send somebody to one. Including it would be the same wrong
+		// instruction in a new place.
+		"wedged":      wedged,
 		"needs_phone": blind + stale,
+		"needs_eyes":  blind + stale + wedged,
 	})
 }
 

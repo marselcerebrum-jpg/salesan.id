@@ -102,6 +102,17 @@ type Session struct {
 	// spent on this connection without one landing.
 	appStateForceCount sync.Map // map[string]*atomic.Int32
 
+	// wedges records, per collection, the patch version WhatsApp's own data
+	// fails at and how often it has been read since.
+	//
+	// A plain map behind a mutex rather than a sync.Map: every operation here
+	// reads the entry, decides from it, and writes it back, and sync.Map has no
+	// way to do that as one step. Two goroutines racing on it would each see
+	// "not due yet" and both skip, or each see "due" and both read, which is
+	// the loop this exists to stop.
+	wedges  map[string]wedgeState
+	wedgeMu sync.Mutex
+
 	// recoveryGates holds an open channel per collection currently being
 	// recovered. Writes to a collection whose local version was cleared are
 	// rejected by the server with `409 conflict`, so writers wait on the gate

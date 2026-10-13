@@ -1686,14 +1686,27 @@ export interface LabelHealth {
   stale_hours: number;
   reason: string | null;
   label_count: number;
-  severity: 'sehat' | 'tertinggal' | 'buta';
+  severity: 'sehat' | 'tertinggal' | 'buta' | 'tersangkut';
+  /**
+   * The patch version WhatsApp's own label data fails at, null when fine.
+   *
+   * Shown rather than hidden because it is how a repeat is recognised as the
+   * same one, and because the number moving is the only thing that means
+   * trying again has a point.
+   */
+  wedged_patch: number | null;
+  wedged_attempts: number;
 }
 
 export interface LabelHealthReport {
   accounts: LabelHealth[];
   blind: number;
   stale: number;
+  wedged: number;
+  /** Numbers an operator can actually do something about from the phone. */
   needs_phone: number;
+  /** Everything worth a human looking, wedged ones included. */
+  needs_eyes: number;
 }
 
 /** One entry in the workspace's sticker library. */

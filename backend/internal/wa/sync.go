@@ -366,23 +366,42 @@ func (s *Session) syncAppState(ctx context.Context, force bool) appStateOutcome 
 		lastErr := s.client.FetchAppState(ctx, name, false, false)
 		if lastErr == nil {
 			out.OK = append(out.OK, string(name))
+			s.forgetWedge(ctx, name)
 			continue
 		}
 
-		// 2. Full snapshot — only when the operator asked for it. It clears the
-		// stored version, and on an account whose server snapshot fails
-		// verification that turns a working (if stale) collection into an
-		// unwritable one until the phone answers a recovery request. Automatic
-		// passes must never inflict that.
+		// 2. Full snapshot — only when the operator asked for it, and only when
+		// it could possibly work.
+		//
+		// whatsmeow deletes the stored version *before* fetching, so a full read
+		// that fails leaves the collection on version zero with nothing put
+		// back. From then on every later read is a full read too, because
+		// version zero forces one — so one failed full read locks the
+		// collection into re-reading the same bad snapshot for ever, and the
+		// cheap incremental path that might have verified is never tried again.
+		//
+		// Hence both guards: do not attempt it on a collection already known to
+		// fail at this exact patch version, and put the version back when the
+		// attempt fails anyway.
 		if force {
-			if full := s.client.FetchAppState(ctx, name, true, false); full == nil {
-				s.log.Debug("app state repaired by full sync", "patch", name, "incremental_err", lastErr)
-				out.OK = append(out.OK, string(name))
-				continue
+			if w, ok := s.wedgedAt(name); ok && w.patch > 0 {
+				s.log.Info("not re-reading this collection whole; its snapshot fails at a known patch",
+					"patch", name, "wedged_at", w.patch, "since", w.since)
 			} else {
-				lastErr = full
+				if full := s.fullFetchKeepingVersion(ctx, name); full == nil {
+					s.log.Debug("app state repaired by full sync", "patch", name, "incremental_err", lastErr)
+					out.OK = append(out.OK, string(name))
+					s.forgetWedge(ctx, name)
+					continue
+				} else {
+					lastErr = full
+				}
 			}
 		}
+
+		// Recorded before anything is asked of the phone, so the next pass can
+		// tell "the same wedge" from "WhatsApp rebuilt its snapshot".
+		s.noteWedgeFrom(ctx, name, lastErr)
 
 		// 3. Ask the phone for a plaintext copy, which skips verification
 		// entirely. Declines on its own if usable state already exists and this
@@ -903,4 +922,62 @@ func (s *Session) handleHistorySync(evt *events.HistorySync) {
 			Skipped:       skipped,
 		},
 	})
+}
+
+// fullFetchKeepingVersion reads a collection whole without betting the version.
+//
+// whatsmeow clears the stored version first and does not put it back when the
+// read fails, which turns one failed repair into a permanently unreadable
+// collection: version zero forces every later read to be a full one, so the
+// incremental path that might still have verified is never tried again.
+//
+// The version is saved here and restored on failure, which keeps the attempt a
+// bet we can lose.
+func (s *Session) fullFetchKeepingVersion(ctx context.Context, name appstate.WAPatchName) error {
+	if ver, hash, err := s.client.Store.AppState.GetAppStateVersion(ctx, string(name)); err == nil && ver > 0 {
+		s.appStateRollback.Store(string(name), appStateSnapshot{version: ver, hash: hash})
+	}
+	err := s.client.FetchAppState(ctx, name, true, false)
+	if err != nil {
+		s.restoreAppStateVersion(name)
+		return err
+	}
+	s.appStateRollback.Delete(string(name))
+	return nil
+}
+
+// noteWedgeFrom records a verification failure, in memory and in the database.
+//
+// Only the labels collection is written down. The others fail too, but nothing
+// reads their history: the screen that needs to say "this has been going on for
+// three weeks, and re-pairing will not help" is the one about labels.
+func (s *Session) noteWedgeFrom(ctx context.Context, name appstate.WAPatchName, err error) {
+	patch, wedged := wedgedPatch(err)
+	if !wedged {
+		return
+	}
+	w, _ := s.noteWedge(name, patch, time.Now())
+	if name != appstate.WAPatchRegular {
+		return
+	}
+	if saveErr := s.mgr.repo.SaveLabelWedge(ctx, s.AccountID, repository.LabelWedge{
+		Patch: w.patch, Since: w.since, LastTry: w.lastTry, Attempts: w.attempts,
+	}); saveErr != nil {
+		s.log.Warn("could not record the label wedge", "patch", name, "err", saveErr)
+	}
+}
+
+// forgetWedge drops a collection's wedge once it has read successfully.
+func (s *Session) forgetWedge(ctx context.Context, name appstate.WAPatchName) {
+	if _, ok := s.wedgedAt(name); !ok {
+		return
+	}
+	s.clearWedge(name)
+	if name != appstate.WAPatchRegular {
+		return
+	}
+	s.log.Info("collection is readable again; wedge cleared", "patch", name)
+	if err := s.mgr.repo.ClearLabelWedge(ctx, s.AccountID); err != nil {
+		s.log.Warn("could not clear the recorded label wedge", "patch", name, "err", err)
+	}
 }
