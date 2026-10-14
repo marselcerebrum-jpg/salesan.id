@@ -105,18 +105,24 @@ function LabelSyncBadge({ state, detail }: { state: LabelSyncState; detail?: str
     syncing: { text: 'Menyinkronkan label…', className: 'bg-warn-soft text-warn' },
     synced: { text: 'Label tersinkron', className: 'bg-brand-600/10 text-brand-700' },
     failed: { text: 'Label gagal sinkron', className: 'bg-danger-soft text-danger' },
+    // Named for what it is rather than softened. "Label belum terverifikasi"
+    // is the one phrase that does not let a reader assume a label set here
+    // reached the phone, which on this state it did not.
+    partial: { text: 'Label belum terverifikasi', className: 'bg-warn-soft text-warn' },
   }[state];
 
   return (
     <span
-      title={state === 'failed' && detail ? detail : undefined}
+      title={state !== 'synced' && detail ? detail : undefined}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-2xs font-medium ${tone.className}`}
     >
       {state === 'syncing' ? (
         <RefreshCw className="size-3 animate-spin" aria-hidden />
       ) : (
         <span
-          className={`size-1.5 rounded-full ${state === 'synced' ? 'bg-online' : 'bg-danger'}`}
+          className={`size-1.5 rounded-full ${
+            state === 'synced' ? 'bg-online' : state === 'partial' ? 'bg-warn' : 'bg-danger'
+          }`}
           aria-hidden
         />
       )}

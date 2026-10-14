@@ -543,4 +543,13 @@ type LabelHealth struct {
 	// WedgedAttempts is how many reads have been made since that version was
 	// first refused.
 	WedgedAttempts int `json:"wedged_attempts"`
+	// LabelsUnverifiedAt is when this number's labels were last read without
+	// checking WhatsApp's MACs, null if never.
+	//
+	// On the row rather than only in the badge, because this list is what
+	// somebody scans to decide what still needs doing, and a number already
+	// read the lenient way needs nothing.
+	LabelsUnverifiedAt *time.Time `json:"labels_unverified_at"`
+	// LabelsUnverifiedCount is how many label changes that read carried.
+	LabelsUnverifiedCount int `json:"labels_unverified_count"`
 }

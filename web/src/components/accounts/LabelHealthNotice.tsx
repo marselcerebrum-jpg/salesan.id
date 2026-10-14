@@ -22,10 +22,22 @@ import type { LabelHealth, LabelHealthReport } from '@/lib/types';
 export function LabelHealthNotice({
   report,
   onReset,
+  onReadUnverified,
+  busyAccountId,
 }: {
   report: LabelHealthReport | undefined;
   /** Opens the confirmation for rebuilding this number's collection. */
   onReset: (account: LabelHealth) => void;
+  /**
+   * Reads a wedged number's labels without verifying WhatsApp's MACs.
+   *
+   * Offered only on `tersangkut`, and only as a second-best: it hands back
+   * labels nothing vouched for, on a number where the alternative has been no
+   * labels at all for a day.
+   */
+  onReadUnverified: (account: LabelHealth) => void;
+  /** The number a bypass read is running for, so its button can show it. */
+  busyAccountId?: string | null;
 }) {
   if (!report || report.needs_eyes === 0) return null;
 
@@ -81,6 +93,9 @@ export function LabelHealthNotice({
           Jangan pasang ulang nomornya dan jangan bangun ulang labelnya: keduanya sudah
           dicoba dan gagal di titik yang sama. Sistem mencoba lagi sendiri dengan jeda
           yang melebar, dan langsung mencoba begitu WhatsApp menyusun ulang datanya.
+          Kalau tidak bisa menunggu, &ldquo;Baca tanpa verifikasi&rdquo; mengambil labelnya
+          apa adanya — bisa dipakai, tetapi tidak ada yang menjamin isinya lengkap, dan
+          label yang diubah dari salesan belum tentu sampai ke HP.
         </p>
       ) : null}
 
@@ -107,6 +122,15 @@ export function LabelHealthNotice({
               <span className="font-medium text-danger">
                 tersangkut di patch v{a.wedged_patch} · {formatStale(a.stale_hours)} ·{' '}
                 {a.wedged_attempts}x dicoba · {a.label_count} label
+                {/* Said on the row, not only in the badge: this is the list
+                    somebody scans to decide what still needs doing, and a
+                    number already read the lenient way needs nothing. */}
+                {a.labels_unverified_at ? (
+                  <span className="font-normal text-warn">
+                    {' '}
+                    · dibaca tanpa verifikasi ({a.labels_unverified_count} perubahan)
+                  </span>
+                ) : null}
               </span>
             ) : a.severity === 'buta' ? (
               <span className="font-medium text-danger">
@@ -124,6 +148,20 @@ export function LabelHealthNotice({
             {a.severity === 'buta' ? (
               <Button size="sm" variant="danger" onClick={() => onReset(a)}>
                 Bangun ulang label
+              </Button>
+            ) : null}
+
+            {/* Not offered on `buta`, where the ordinary repairs have not been
+                tried yet, and not on `tertinggal`, which fixes itself. Only
+                here, where every proper route has been exhausted and the choice
+                is between unproven labels and none. */}
+            {a.severity === 'tersangkut' ? (
+              <Button
+                size="sm"
+                loading={busyAccountId === a.account_id}
+                onClick={() => onReadUnverified(a)}
+              >
+                {a.labels_unverified_at ? 'Baca ulang tanpa verifikasi' : 'Baca tanpa verifikasi'}
               </Button>
             ) : null}
           </li>

@@ -25,6 +25,14 @@ const (
 	LabelSyncSyncing = "syncing"
 	LabelSyncSynced  = "synced"
 	LabelSyncFailed  = "failed"
+	// LabelSyncPartial is a number whose labels are usable but not proven.
+	//
+	// Neither of the other two fits, and forcing one lies in a direction. A
+	// number reading labels from a snapshot nothing vouched for is not synced,
+	// because a label changed here will not reach the phone while the stored
+	// version sits at zero. It is not failed either, because the labels are on
+	// screen and being worked with.
+	LabelSyncPartial = "partial"
 )
 
 // waLabelPalette approximates the fixed colour wheel WhatsApp Business offers
@@ -1109,14 +1117,14 @@ func (s *Session) settleLabelIndicator(ctx context.Context) {
 
 	// Unknown counts as read. Inventing a failure out of a database error would
 	// put a red badge on a number that is probably fine.
-	everRead := true
-	if ever, err := s.mgr.repo.LabelsEverRead(ctx, s.AccountID); err != nil {
-		s.log.Warn("could not check whether labels were ever read", "err", err)
+	facts := repository.LabelReadFacts{EverRead: true}
+	if got, err := s.mgr.repo.LabelReadFacts(ctx, s.AccountID); err != nil {
+		s.log.Warn("could not read how this number's labels were last obtained", "err", err)
 	} else {
-		everRead = ever
+		facts = got
 	}
 
-	state, detail := labelIndicatorState(wedged, everRead)
+	state, detail := labelIndicatorState(wedged, facts)
 	_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, state, detail)
 	s.broadcastSyncState(ctx, state, detail)
 }
@@ -1127,11 +1135,20 @@ func (s *Session) settleLabelIndicator(ctx context.Context) {
 // Separated from the writing of it so the rule can be tested, because the rule
 // is what was wrong: one branch settled both "your label set is a refresh
 // behind" and "this number has never held a label" to the same cheerful word.
-func labelIndicatorState(wedged *wedgeState, everRead bool) (state, detail string) {
+func labelIndicatorState(
+	wedged *wedgeState, facts repository.LabelReadFacts,
+) (state, detail string) {
 	switch {
+	// Wedged, but somebody has read the collection the lenient way since. The
+	// labels are usable, so "failed" is wrong; nothing vouched for them and a
+	// change here will not reach the phone, so "synced" is wrong too. Checked
+	// before the plain wedge case, otherwise the next reconciliation pass would
+	// overwrite partial with failed ten minutes after every bypass read.
+	case wedged != nil && facts.UnverifiedAt != nil:
+		return LabelSyncPartial, unverifiedDetail(*wedged, facts.UnverifiedCount, *facts.UnverifiedAt)
 	case wedged != nil:
 		return LabelSyncFailed, wedgeDetail(*wedged)
-	case !everRead:
+	case !facts.EverRead:
 		return LabelSyncFailed, "Label belum pernah berhasil dibaca dari nomor ini. " +
 			"Buka WhatsApp di HP nomor ini, biarkan terbuka, lalu tekan Sinkron."
 	default:

@@ -123,7 +123,15 @@ export interface AccountStats {
 }
 
 /** Per-account label sync state, driving the Menyinkronkan/Tersinkron/Gagal badge. */
-export type LabelSyncState = 'idle' | 'syncing' | 'synced' | 'failed';
+/**
+ * What the label indicator may claim.
+ *
+ * `partial` is the fourth because three could not hold the truth about a number
+ * whose labels were read without verifying WhatsApp's MACs: such a number is
+ * not synced, since a label set here will not reach the phone, and not failed
+ * either, since the labels are on screen and being worked with.
+ */
+export type LabelSyncState = 'idle' | 'syncing' | 'synced' | 'failed' | 'partial';
 
 export interface Label {
   id: string;
@@ -1704,6 +1712,17 @@ export interface LabelHealth {
    */
   wedged_patch: number | null;
   wedged_attempts: number;
+  /** When the labels were last read without verifying WhatsApp's MACs. */
+  labels_unverified_at: string | null;
+  /** How many label changes that read carried. */
+  labels_unverified_count: number;
+}
+
+/** What one bypass read achieved. */
+export interface UnverifiedLabelRead {
+  mutations: number;
+  labels: number;
+  patch: number;
 }
 
 export interface LabelHealthReport {

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/appstate"
+
+	"github.com/salesan/omnichannel/backend/internal/repository"
 )
 
 // The exact strings production produced, because the patch version is parsed
@@ -226,37 +228,48 @@ func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
 		since:    time.Date(2026, 10, 14, 1, 56, 0, 0, time.UTC),
 		attempts: 2,
 	}
+	bypassed := time.Date(2026, 10, 14, 3, 10, 0, 0, time.UTC)
+
+	read := repository.LabelReadFacts{EverRead: true}
+	never := repository.LabelReadFacts{EverRead: false}
+	lenient := repository.LabelReadFacts{EverRead: false, UnverifiedAt: &bypassed, UnverifiedCount: 31}
 
 	tests := []struct {
-		name     string
-		wedged   *wedgeState
-		everRead bool
-		want     string
+		name   string
+		wedged *wedgeState
+		facts  repository.LabelReadFacts
+		want   string
 	}{
 		// The case that was wrong, in both of its forms.
-		{"wedged and never read", wedge, false, LabelSyncFailed},
-		{"never read", nil, false, LabelSyncFailed},
+		{"wedged and never read", wedge, never, LabelSyncFailed},
+		{"never read", nil, never, LabelSyncFailed},
 
 		// Wedged but holding a set from before. Still not synced: the set is
 		// frozen at the patch before the wedge and will not move again until
 		// WhatsApp rebuilds, which is a different thing from being up to date.
 		// JADIBUMN HP IKLAN is this, with 25 labels stuck at v488.
-		{"wedged but has read before", wedge, true, LabelSyncFailed},
+		{"wedged but has read before", wedge, read, LabelSyncFailed},
 
-		// The one case that may claim it: a set is on screen and a refresh is
-		// merely outstanding. Saying failed here would cry wolf every ten
+		// Read the lenient way since. Usable, so not failed; vouched for by
+		// nothing and one-way, so not synced either. This case has to be
+		// decided before the plain wedge above, or the next reconciliation pass
+		// would overwrite it ten minutes after every bypass read.
+		{"wedged and read without verification", wedge, lenient, LabelSyncPartial},
+
+		// The one case that may claim synced: a set is on screen and a refresh
+		// is merely outstanding. Saying failed here would cry wolf every ten
 		// minutes on an account that works.
-		{"read before and not wedged", nil, true, LabelSyncSynced},
+		{"read before and not wedged", nil, read, LabelSyncSynced},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state, detail := labelIndicatorState(tt.wedged, tt.everRead)
+			state, detail := labelIndicatorState(tt.wedged, tt.facts)
 			if state != tt.want {
 				t.Errorf("state = %q, want %q", state, tt.want)
 			}
-			if state == LabelSyncFailed && strings.TrimSpace(detail) == "" {
-				t.Error("a failed badge with nothing to read is the silence this replaced")
+			if state != LabelSyncSynced && strings.TrimSpace(detail) == "" {
+				t.Error("a badge that is not synced with nothing to read is the silence this replaced")
 			}
 			if state == LabelSyncSynced && detail != "" {
 				t.Errorf("a synced badge carries an explanation: %q", detail)
@@ -266,12 +279,21 @@ func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
 
 	// The wedge sentence has to carry the patch version, because that number is
 	// what lets anybody tell a repeat from a new problem.
-	if _, detail := labelIndicatorState(wedge, false); !strings.Contains(detail, "v1176") {
+	if _, detail := labelIndicatorState(wedge, never); !strings.Contains(detail, "v1176") {
 		t.Errorf("the wedge detail does not name the patch version: %q", detail)
 	}
 	// And it must not tell anyone to re-pair. That instruction was wrong, was
 	// acted on, and cost a QR scan.
-	if _, detail := labelIndicatorState(wedge, false); !strings.Contains(detail, "tidak menolong") {
+	if _, detail := labelIndicatorState(wedge, never); !strings.Contains(detail, "tidak menolong") {
 		t.Errorf("the wedge detail does not say re-pairing will not help: %q", detail)
+	}
+	// The partial sentence has to admit both halves of what it is: unverified,
+	// and one-way. An operator who reads only "label dibaca" will expect a
+	// label they set here to show up on the phone.
+	_, partial := labelIndicatorState(wedge, lenient)
+	for _, want := range []string{"tanpa verifikasi", "v1176", "belum tentu sampai ke HP"} {
+		if !strings.Contains(partial, want) {
+			t.Errorf("the partial detail omits %q: %q", want, partial)
+		}
 	}
 }

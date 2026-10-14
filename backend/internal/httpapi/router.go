@@ -138,6 +138,10 @@ func (s *Server) Handler() http.Handler {
 					r.Post("/logout", s.handleLogoutAccount)
 					r.Post("/sync", s.handleSyncAccount)
 					r.Post("/reset-labels", s.handleResetLabelCollection)
+					// The one route that reads data WhatsApp will not vouch
+					// for. Pressed by a person, per number, and refused on a
+					// collection that is not wedged.
+					r.Post("/labels/read-unverified", s.handleReadLabelsUnverified)
 
 					r.Get("/conversations", s.handleListConversations)
 					r.Get("/conversations/counts", s.handleConversationCounts)

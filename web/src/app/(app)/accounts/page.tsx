@@ -33,6 +33,7 @@ import {
   resetLabelCollection,
   disconnectAccount,
   fetcher,
+  readLabelsUnverified,
   syncAccount,
 } from '@/lib/api';
 import { useRealtimeEvent } from '@/lib/realtime';
@@ -62,6 +63,7 @@ export default function AccountsPage() {
   const [pendingDelete, setPendingDelete] = useState<Account | null>(null);
   const [pendingReset, setPendingReset] = useState<LabelHealth | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [bypassing, setBypassing] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -76,6 +78,37 @@ export default function AccountsPage() {
     fetcher,
   );
   const applications = useMemo(() => appsData?.applications ?? [], [appsData]);
+
+  /**
+   * Reads a wedged number's labels without verifying WhatsApp's MACs.
+   *
+   * No confirmation dialog, unlike the rebuild beside it, and the difference is
+   * deliberate: this one is reversible and harms nothing. It reads, it writes
+   * labels into our own tables, and a later verified read replaces the lot. The
+   * rebuild logs out every linked device, which is why that one asks twice.
+   */
+  async function handleReadUnverified(account: LabelHealth) {
+    setBypassing(account.account_id);
+    setError(null);
+    setNotice(null);
+    try {
+      const { result } = await readLabelsUnverified(account.account_id);
+      void mutateLabelHealth();
+      void mutateAccounts();
+      setNotice(
+        result.mutations === 0
+          ? `Snapshot label ${account.label ?? account.name} terbaca, tetapi isinya kosong — ` +
+              `nomor ini memang tidak punya label di WhatsApp.`
+          : `${result.mutations} perubahan label terbaca dari ${account.label ?? account.name} ` +
+              `(sekarang ${result.labels} label). Tidak terverifikasi: patch v${result.patch} ` +
+              `masih rusak, jadi label yang diubah dari salesan belum tentu sampai ke HP.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Pembacaan tanpa verifikasi gagal.');
+    } finally {
+      setBypassing(null);
+    }
+  }
 
   const accountsKey = accountsPath({
     application_id: appFilter && appFilter !== UNASSIGNED ? appFilter : undefined,
@@ -101,9 +134,11 @@ export default function AccountsPage() {
    * finished reading it. The cost is one small query per minute per open
    * tab, against six days of nobody knowing.
    */
-  const { data: labelHealth } = useSWR<LabelHealthReport>('/accounts/label-health', fetcher, {
-    refreshInterval: 60_000,
-  });
+  const { data: labelHealth, mutate: mutateLabelHealth } = useSWR<LabelHealthReport>(
+    '/accounts/label-health',
+    fetcher,
+    { refreshInterval: 60_000 },
+  );
 
   const accounts = useMemo(() => accountsData?.accounts ?? [], [accountsData]);
 
@@ -350,7 +385,12 @@ export default function AccountsPage() {
       </div>
 
       <div className="mt-4">
-        <LabelHealthNotice report={labelHealth} onReset={setPendingReset} />
+        <LabelHealthNotice
+          report={labelHealth}
+          onReset={setPendingReset}
+          onReadUnverified={(a) => void handleReadUnverified(a)}
+          busyAccountId={bypassing}
+        />
       </div>
 
       <nav className="mt-6 flex gap-6 border-b border-hairline" aria-label="Metode koneksi">

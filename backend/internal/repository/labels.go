@@ -509,7 +509,12 @@ func (r *Repo) MarkLabelCollectionRead(ctx context.Context, accountID uuid.UUID)
 		       labels_wedged_patch   = null,
 		       labels_wedged_since   = null,
 		       labels_wedge_last_try = null,
-		       labels_wedge_attempts = 0
+		       labels_wedge_attempts = 0,
+		       -- A verified read supersedes the bypass entirely. Left behind,
+		       -- it would keep the badge on partial for a number that is now
+		       -- provably fine.
+		       labels_unverified_at    = null,
+		       labels_unverified_count = 0
 		 where id = $1`, accountID)
 	return err
 }
@@ -540,22 +545,49 @@ type LabelWedge struct {
 	Attempts int
 }
 
-// LabelsEverRead reports whether this number has ever decoded its label
-// collection.
+// MarkLabelsUnverified records a read that bypassed WhatsApp's MAC check.
 //
-// The question the badge was deciding without asking. "Synced" is a defensible
-// thing to say about a number whose label set is on screen and merely a refresh
-// behind; it is not a defensible thing to say about a number that has never
-// held a label, and the two were being settled by the same branch.
-func (r *Repo) LabelsEverRead(ctx context.Context, accountID uuid.UUID) (bool, error) {
-	var ever bool
-	err := r.pool.QueryRow(ctx,
-		`select labels_read_at is not null from public.whatsapp_accounts where id = $1`,
-		accountID).Scan(&ever)
+// Its own column rather than labels_read_at, which means "read and proven" and
+// is what the health check ranks on. Folding the two together would make this
+// number look healthy, and the whole reason the bypass exists is that it is not.
+func (r *Repo) MarkLabelsUnverified(ctx context.Context, accountID uuid.UUID, mutations int) error {
+	_, err := r.pool.Exec(ctx, `
+		update public.whatsapp_accounts
+		   set labels_unverified_at    = now(),
+		       labels_unverified_count = $2
+		 where id = $1`, accountID, mutations)
+	return err
+}
+
+// LabelReadFacts is how this number came by the labels it holds.
+//
+// The questions the badge was deciding without asking. "Synced" is defensible
+// about a number whose label set is on screen and merely a refresh behind. It
+// is not defensible about a number that has never held a label, nor about one
+// whose labels came from a snapshot nothing vouched for — and all three were
+// being settled by the same branch.
+type LabelReadFacts struct {
+	// EverRead is whether the collection has ever decoded with its MACs intact.
+	EverRead bool
+	// UnverifiedAt is the last read that skipped the MAC check, nil if none.
+	UnverifiedAt *time.Time
+	// UnverifiedCount is how many label changes that read carried.
+	UnverifiedCount int
+}
+
+// LabelReadFacts reads both in one query, because the badge needs both to say
+// anything true and two round trips would let them disagree.
+func (r *Repo) LabelReadFacts(ctx context.Context, accountID uuid.UUID) (LabelReadFacts, error) {
+	var out LabelReadFacts
+	err := r.pool.QueryRow(ctx, `
+		select labels_read_at is not null, labels_unverified_at, labels_unverified_count
+		  from public.whatsapp_accounts
+		 where id = $1`, accountID).
+		Scan(&out.EverRead, &out.UnverifiedAt, &out.UnverifiedCount)
 	if err != nil {
-		return false, mapErr(err)
+		return LabelReadFacts{}, mapErr(err)
 	}
-	return ever, nil
+	return out, nil
 }
 
 // LoadLabelWedge reads back the wedge a previous session recorded.
@@ -645,6 +677,7 @@ func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models
 		select a.id, a.name, a.label, a.phone_number, ap.name,
 		       a.status::text, a.labels_read_at, a.labels_stale_since,
 		       a.labels_stale_error, a.labels_wedged_patch, a.labels_wedge_attempts,
+		       a.labels_unverified_at, a.labels_unverified_count,
 		       (select count(*) from public.conversation_labels l where l.account_id = a.id)
 		  from public.whatsapp_accounts a
 		  left join public.applications ap on ap.id = a.application_id
@@ -660,7 +693,8 @@ func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models
 		var h models.LabelHealth
 		if err := rows.Scan(&h.AccountID, &h.Name, &h.Label, &h.PhoneNumber,
 			&h.ApplicationName, &h.Status, &h.ReadAt, &h.StaleSince,
-			&h.Reason, &h.WedgedPatch, &h.WedgedAttempts, &h.LabelCount); err != nil {
+			&h.Reason, &h.WedgedPatch, &h.WedgedAttempts,
+			&h.LabelsUnverifiedAt, &h.LabelsUnverifiedCount, &h.LabelCount); err != nil {
 			return nil, err
 		}
 

@@ -45,6 +45,7 @@ import type {
   Workspace,
   WorkSchedule,
   Sticker,
+  UnverifiedLabelRead,
 } from '@/lib/types';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
@@ -634,6 +635,19 @@ export const sendPrivateReply = (messageId: string, body: string) =>
     `/messages/${messageId}/private-reply`,
     { method: 'POST', body: JSON.stringify({ body }) },
   );
+
+/**
+ * Reads a wedged number's labels without checking WhatsApp's MACs.
+ *
+ * Gives up the proof that a snapshot's mutations are the ones WhatsApp signed.
+ * Offered only where the alternative is no labels at all, refused by the server
+ * on a collection that is not wedged, and never called on a schedule — a person
+ * presses it for one number.
+ */
+export const readLabelsUnverified = (accountId: string) =>
+  request<{ result: UnverifiedLabelRead }>(`/accounts/${accountId}/labels/read-unverified`, {
+    method: 'POST',
+  });
 
 /**
  * Finds, or opens, the chat for a number read inside somebody's message.
