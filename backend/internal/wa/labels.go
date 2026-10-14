@@ -1124,7 +1124,7 @@ func (s *Session) settleLabelIndicator(ctx context.Context) {
 		facts = got
 	}
 
-	state, detail := labelIndicatorState(wedged, facts)
+	state, detail := labelIndicatorState(wedged, facts, time.Now())
 	_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, state, detail)
 	s.broadcastSyncState(ctx, state, detail)
 }
@@ -1136,7 +1136,7 @@ func (s *Session) settleLabelIndicator(ctx context.Context) {
 // is what was wrong: one branch settled both "your label set is a refresh
 // behind" and "this number has never held a label" to the same cheerful word.
 func labelIndicatorState(
-	wedged *wedgeState, facts repository.LabelReadFacts,
+	wedged *wedgeState, facts repository.LabelReadFacts, now time.Time,
 ) (state, detail string) {
 	switch {
 	// Wedged, but somebody has read the collection the lenient way since. The
@@ -1146,7 +1146,12 @@ func labelIndicatorState(
 	// overwrite partial with failed ten minutes after every bypass read.
 	case wedged != nil && facts.UnverifiedAt != nil:
 		return LabelSyncPartial, unverifiedDetail(*wedged, facts.UnverifiedCount, *facts.UnverifiedAt)
-	case wedged != nil:
+
+	// Recorded, but not yet shown to be more than weather. A mismatch that has
+	// been there under half an hour falls through to the ordinary rules, which
+	// for a number holding a label set means synced: it is, and the retry is
+	// already scheduled.
+	case wedged != nil && wedgeIsProven(facts.StaleSince, now):
 		return LabelSyncFailed, wedgeDetail(*wedged)
 	case !facts.EverRead:
 		return LabelSyncFailed, "Label belum pernah berhasil dibaca dari nomor ini. " +

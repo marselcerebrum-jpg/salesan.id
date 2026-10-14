@@ -229,10 +229,16 @@ func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
 		attempts: 2,
 	}
 	bypassed := time.Date(2026, 10, 14, 3, 10, 0, 0, time.UTC)
+	now := time.Date(2026, 10, 14, 4, 0, 0, 0, time.UTC)
+	// Long enough ago that the wedge counts as proven. The threshold itself is
+	// exercised in TestAFreshMismatchIsNotYetReportedAsAWedge.
+	long := now.Add(-22 * time.Hour)
 
-	read := repository.LabelReadFacts{EverRead: true}
-	never := repository.LabelReadFacts{EverRead: false}
-	lenient := repository.LabelReadFacts{EverRead: false, UnverifiedAt: &bypassed, UnverifiedCount: 31}
+	read := repository.LabelReadFacts{EverRead: true, StaleSince: &long}
+	never := repository.LabelReadFacts{EverRead: false, StaleSince: &long}
+	lenient := repository.LabelReadFacts{
+		EverRead: false, StaleSince: &long, UnverifiedAt: &bypassed, UnverifiedCount: 31,
+	}
 
 	tests := []struct {
 		name   string
@@ -264,7 +270,7 @@ func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state, detail := labelIndicatorState(tt.wedged, tt.facts)
+			state, detail := labelIndicatorState(tt.wedged, tt.facts, now)
 			if state != tt.want {
 				t.Errorf("state = %q, want %q", state, tt.want)
 			}
@@ -279,21 +285,86 @@ func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
 
 	// The wedge sentence has to carry the patch version, because that number is
 	// what lets anybody tell a repeat from a new problem.
-	if _, detail := labelIndicatorState(wedge, never); !strings.Contains(detail, "v1176") {
+	if _, detail := labelIndicatorState(wedge, never, now); !strings.Contains(detail, "v1176") {
 		t.Errorf("the wedge detail does not name the patch version: %q", detail)
 	}
 	// And it must not tell anyone to re-pair. That instruction was wrong, was
 	// acted on, and cost a QR scan.
-	if _, detail := labelIndicatorState(wedge, never); !strings.Contains(detail, "tidak menolong") {
+	if _, detail := labelIndicatorState(wedge, never, now); !strings.Contains(detail, "tidak menolong") {
 		t.Errorf("the wedge detail does not say re-pairing will not help: %q", detail)
 	}
 	// The partial sentence has to admit both halves of what it is: unverified,
 	// and one-way. An operator who reads only "label dibaca" will expect a
 	// label they set here to show up on the phone.
-	_, partial := labelIndicatorState(wedge, lenient)
+	_, partial := labelIndicatorState(wedge, lenient, now)
 	for _, want := range []string{"tanpa verifikasi", "v1176", "belum tentu sampai ke HP"} {
 		if !strings.Contains(partial, want) {
 			t.Errorf("the partial detail omits %q: %q", want, partial)
 		}
+	}
+}
+
+// A mismatch that has been there five minutes is not a wedge yet.
+//
+// Five numbers appeared in the warning box within minutes of each other, four
+// of them holding nineteen to twenty-five labels they had read perfectly well,
+// three of them having failed exactly once — and each was offered a button that
+// skips cryptographic verification, for a problem that had not been shown to
+// exist. Recording starts at the first failure because the backoff needs it;
+// reporting must wait until there is something to report.
+func TestAFreshMismatchIsNotYetReportedAsAWedge(t *testing.T) {
+	now := time.Date(2026, 10, 14, 7, 36, 0, 0, time.UTC)
+	wedge := &wedgeState{patch: 711, since: now.Add(-6 * time.Minute), attempts: 1}
+
+	ago := func(d time.Duration) *time.Time {
+		t := now.Add(-d)
+		return &t
+	}
+
+	// TIM PEMBIMBING and JADIBUMN SAVE KONTAK, as they actually were: minutes
+	// old, one attempt, a full label set already read.
+	fresh := repository.LabelReadFacts{EverRead: true, StaleSince: ago(6 * time.Minute)}
+	if state, _ := labelIndicatorState(wedge, fresh, now); state != LabelSyncSynced {
+		t.Errorf("a six minute old mismatch reported as %q; the retry is already scheduled "+
+			"and the labels are on screen", state)
+	}
+
+	// JADIBUMN HP IKLAN, twenty-two hours in. That is not weather.
+	proven := repository.LabelReadFacts{EverRead: true, StaleSince: ago(22 * time.Hour)}
+	if state, _ := labelIndicatorState(wedge, proven, now); state != LabelSyncFailed {
+		t.Errorf("a wedge of twenty-two hours reported as %q", state)
+	}
+
+	// The boundary itself, from both sides.
+	if state, _ := labelIndicatorState(wedge, repository.LabelReadFacts{
+		EverRead: true, StaleSince: ago(wedgeConfirmAfter - time.Minute),
+	}, now); state != LabelSyncSynced {
+		t.Error("reported one minute before the threshold")
+	}
+	if state, _ := labelIndicatorState(wedge, repository.LabelReadFacts{
+		EverRead: true, StaleSince: ago(wedgeConfirmAfter),
+	}, now); state != LabelSyncFailed {
+		t.Error("not reported at the threshold")
+	}
+
+	// A number that has never read anything is still failed whatever the clock
+	// says. Waiting half an hour to admit it holds no labels helps nobody.
+	if state, _ := labelIndicatorState(wedge, repository.LabelReadFacts{
+		EverRead: false, StaleSince: ago(time.Minute),
+	}, now); state != LabelSyncFailed {
+		t.Error("a number that has never read its labels was called synced")
+	}
+
+	// And a lenient read still wins over the clock: those labels are in use.
+	when := now.Add(-time.Minute)
+	if state, _ := labelIndicatorState(wedge, repository.LabelReadFacts{
+		EverRead: false, StaleSince: ago(time.Minute), UnverifiedAt: &when, UnverifiedCount: 3419,
+	}, now); state != LabelSyncPartial {
+		t.Errorf("a number read the lenient way reported as %q", state)
+	}
+
+	// The gate itself: nil means nothing has failed, which cannot be a wedge.
+	if wedgeIsProven(nil, now) {
+		t.Error("a wedge was proven with no run of failures behind it")
 	}
 }

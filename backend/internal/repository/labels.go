@@ -573,6 +573,13 @@ type LabelReadFacts struct {
 	UnverifiedAt *time.Time
 	// UnverifiedCount is how many label changes that read carried.
 	UnverifiedCount int
+	// StaleSince is when this run of failed reads began, nil when none.
+	//
+	// The clock a wedge is judged by. The wedge's own timestamp resets whenever
+	// WhatsApp rebuilds its snapshot and fails at a new version, which on a
+	// number that has been failing for a day would restart the count every few
+	// hours and never let it be reported.
+	StaleSince *time.Time
 }
 
 // LabelReadFacts reads both in one query, because the badge needs both to say
@@ -580,10 +587,11 @@ type LabelReadFacts struct {
 func (r *Repo) LabelReadFacts(ctx context.Context, accountID uuid.UUID) (LabelReadFacts, error) {
 	var out LabelReadFacts
 	err := r.pool.QueryRow(ctx, `
-		select labels_read_at is not null, labels_unverified_at, labels_unverified_count
+		select labels_read_at is not null, labels_unverified_at,
+		       labels_unverified_count, labels_stale_since
 		  from public.whatsapp_accounts
 		 where id = $1`, accountID).
-		Scan(&out.EverRead, &out.UnverifiedAt, &out.UnverifiedCount)
+		Scan(&out.EverRead, &out.UnverifiedAt, &out.UnverifiedCount, &out.StaleSince)
 	if err != nil {
 		return LabelReadFacts{}, mapErr(err)
 	}
@@ -670,6 +678,12 @@ func (r *Repo) ClearLabelWedge(ctx context.Context, accountID uuid.UUID) error {
 // about something else.
 const labelStaleAfter = time.Hour
 
+// labelWedgeConfirmAfter is how long a recorded wedge must persist before this
+// list calls it one. Kept beside labelStaleAfter, and deliberately shorter: a
+// wedge is a worse thing than being behind, so it earns attention sooner, but
+// not so soon that ordinary weather sets off an alarm.
+const labelWedgeConfirmAfter = 30 * time.Minute
+
 // LabelHealth answers, for every connected number, whether its labels are
 // actually readable — and ranks the ones that are not.
 func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models.LabelHealth, error) {
@@ -712,7 +726,15 @@ func (r *Repo) LabelHealth(ctx context.Context, workspaceID uuid.UUID) ([]models
 			// MAC, and re-pairing the phone was already proved useless on
 			// CEREBRUM UTAMA. Collapsing them is what sent somebody to scan a
 			// QR code for nothing.
-			case h.WedgedPatch != nil:
+			//
+			// The age gate is the other half, and it was missing: a wedge is
+			// recorded on the first failure, because the backoff needs it then,
+			// but a mismatch under half an hour old has not been shown to be
+			// anything. Without this, five numbers appeared here within minutes,
+			// four holding label sets they had read perfectly well, three having
+			// failed exactly once — and each was offered a button that skips
+			// cryptographic verification for a problem not yet demonstrated.
+			case h.WedgedPatch != nil && stale >= labelWedgeConfirmAfter:
 				h.Severity = "tersangkut"
 			// Never read at all is its own thing: the number is not behind on
 			// its labels, it has none. Two numbers sat like this for days while

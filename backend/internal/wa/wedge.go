@@ -76,6 +76,36 @@ var wedgeBackoff = []time.Duration{
 	6 * time.Hour,
 }
 
+// wedgeConfirmAfter is how long a number must be unable to read its labels
+// before the failure is reported as a wedge rather than merely recorded as one.
+//
+// Recording starts at the first failure, because the backoff needs it from
+// then. Reporting must not, and the difference is what went wrong: five numbers
+// appeared in the warning box within minutes of each other, four of them
+// holding nineteen to twenty-five labels they had read perfectly well, three of
+// them having failed exactly once. One of those was offered a button that
+// skips cryptographic verification — for a problem that had not been shown to
+// exist yet.
+//
+// An LTHash mismatch turns out to be ordinary weather across this fleet. What
+// is not ordinary is one that is still there half an hour later: CEREBRUM UTAMA
+// failed at the same patch eighteen times across a day, and JADIBUMN HP IKLAN
+// has been at it for twenty-two hours. Thirty minutes separates those from a
+// blip and still leaves most of an hour before anybody could have acted anyway.
+const wedgeConfirmAfter = 30 * time.Minute
+
+// wedgeIsProven reports whether a recorded wedge has lasted long enough to be
+// worth a person's attention.
+//
+// Measured from when the run of failures began rather than from the wedge's own
+// first sighting, because the wedge resets whenever WhatsApp rebuilds its
+// snapshot and fails at a new version. A number that has been failing for a day
+// at a moving target is not having a blip, and resetting its clock every time
+// the patch number changes would hide exactly the worst case.
+func wedgeIsProven(staleSince *time.Time, now time.Time) bool {
+	return staleSince != nil && now.Sub(*staleSince) >= wedgeConfirmAfter
+}
+
 // wedgeDetail is the one sentence the operator reads about a wedge.
 //
 // One function because there are three places that have to say it — the badge
