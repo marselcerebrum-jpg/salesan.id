@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 
 	"github.com/salesan/omnichannel/backend/internal/repository"
@@ -366,5 +367,56 @@ func TestAFreshMismatchIsNotYetReportedAsAWedge(t *testing.T) {
 	// The gate itself: nil means nothing has failed, which cannot be a wedge.
 	if wedgeIsProven(nil, now) {
 		t.Error("a wedge was proven with no run of failures behind it")
+	}
+}
+
+// The error that is not a refusal.
+//
+// whatsmeow sends the patch and then reads the collection back, under one call.
+// A genuine rejection is wrapped in ErrAppStateUpdate and comes back before the
+// read; anything after it happened to a patch WhatsApp had already accepted. On
+// a collection whose chain fails verification, the read-back is exactly what
+// fails — and it was being reported to the operator as "WhatsApp menolak
+// perubahan" while the label sat on WhatsApp and was deliberately not written
+// to our own table.
+func TestAFailedReadBackIsNotARefusedWrite(t *testing.T) {
+	readBack := fmt.Errorf(
+		"failed to fetch app state after sending update: %w",
+		fmt.Errorf("failed to decode app state regular patches: failed to verify patch v298: %w",
+			appstate.ErrMismatchingLTHash))
+
+	if !writeLanded(readBack) {
+		t.Error("the read-back failure was read as a refusal; the label is on WhatsApp either way")
+	}
+	if wedgedCollection(readBack) {
+		t.Error("a read-back failure must not trigger the repair path: there is nothing to repair")
+	}
+
+	// A real refusal, as WhatsApp sends it: wrapped in the sentinel, carrying
+	// the 409. This one genuinely did not land.
+	refused := fmt.Errorf("%w (regular): <error code=\"409\" text=\"mismatching LTHash\"/>",
+		whatsmeow.ErrAppStateUpdate)
+	if writeLanded(refused) {
+		t.Error("a 409 refusal was read as a landed write")
+	}
+	if !wedgedCollection(refused) {
+		t.Error("a 409 carrying LTHash is what the repair path exists for")
+	}
+
+	// Neither of the two: a send that never reached the server at all.
+	offline := errors.New("websocket not connected")
+	if writeLanded(offline) {
+		t.Error("a transport failure was read as a landed write")
+	}
+
+	// And the sentinel alone still counts as a refusal even without the text,
+	// so a reworded server error cannot be mistaken for a success.
+	if writeLanded(fmt.Errorf("%w: failed to fetch app state after sending update",
+		whatsmeow.ErrAppStateUpdate)) {
+		t.Error("the sentinel must outrank the wording")
+	}
+
+	if writeLanded(nil) {
+		t.Error("no error is not a landed write, it is simply a write")
 	}
 }

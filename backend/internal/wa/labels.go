@@ -279,6 +279,32 @@ func wedgedCollection(err error) bool {
 	return strings.Contains(text, `code="409"`) && strings.Contains(text, "LTHash")
 }
 
+// writeLanded reports whether a failed SendAppState had, in fact, already
+// succeeded.
+//
+// whatsmeow does two things under one call: it sends the patch, and then reads
+// the collection back. The send is judged first, and a genuine rejection comes
+// back wrapped in ErrAppStateUpdate — that is the 409. Anything after that
+// point happened to a patch WhatsApp had already accepted, and on a collection
+// whose chain fails verification the read-back is exactly what fails:
+//
+//	failed to fetch app state after sending update: failed to decode app state
+//	regular patches: failed to verify patch v298: mismatching LTHash
+//
+// We were treating that as a refusal. The label was on WhatsApp, the operator
+// was told it was rejected, and the local row was deliberately not written —
+// producing precisely the divergence that writing WhatsApp first is meant to
+// prevent, in the opposite direction.
+//
+// The stored versions say it plainly: CEREBRUM 20753 sits at v305 while its
+// chain fails at v298, and TIM PEMBIMBING at v713 against v703. Both are past
+// the broken link, which only happens if write after write landed.
+func writeLanded(err error) bool {
+	return err != nil &&
+		!errors.Is(err, whatsmeow.ErrAppStateUpdate) &&
+		strings.Contains(err.Error(), "failed to fetch app state after sending update")
+}
+
 // repairAndRetryLabelWrite clears the collection, waits for WhatsApp to send it
 // back, and runs the write once more.
 //
@@ -397,7 +423,10 @@ func (m *Manager) PushLabelDefinition(
 		// Creating a label is the first write most operators make, so it is
 		// also where a collection that fell out of step is first noticed. Same
 		// treatment as tagging a chat: repair it and write once more.
-		if wedgedCollection(err) {
+		if writeLanded(err) {
+			s.log.Info("label definition landed; only reading it back failed",
+				"label", name, "err", err)
+		} else if wedgedCollection(err) {
 			if err = s.repairAndRetryLabelWrite(ctx, send); err != nil {
 				s.log.Warn("push label definition still refused after repair",
 					"label", name, "err", err)
@@ -497,6 +526,14 @@ func (m *Manager) PushChatLabel(
 		}
 
 		err := send()
+		if writeLanded(err) {
+			// Accepted by WhatsApp; the error belongs to the read-back. Treated
+			// as the success it is, and the collection is read again on the
+			// next reconciliation pass like any other.
+			s.log.Info("chat label landed; only reading it back failed",
+				"wa_label_id", waID, "chat", jid.String(), "labeled", labeled, "err", err)
+			continue
+		}
 		if wedgedCollection(err) {
 			// Except when the repair is already known not to work.
 			//
@@ -528,6 +565,11 @@ func (m *Manager) PushChatLabel(
 			// Repair it and try the same write once more, so the operator's
 			// action lands instead of being handed back to them.
 			err = s.repairAndRetryLabelWrite(ctx, send)
+			if writeLanded(err) {
+				s.log.Info("chat label landed on the retry; only reading it back failed",
+					"wa_label_id", waID, "chat", jid.String(), "err", err)
+				continue
+			}
 			if wedgedCollection(err) || err != nil {
 				s.log.Warn("push chat label still refused after repair",
 					"wa_label_id", waID, "chat", jid.String(), "err", err)
