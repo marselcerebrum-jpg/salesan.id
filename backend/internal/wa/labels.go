@@ -1241,6 +1241,16 @@ func labelIndicatorState(
 	}
 }
 
+// healRetryAfter is how long before a wedge that survived one lenient read is
+// offered another.
+//
+// Long, because a second attempt on an unchanged collection reads the same
+// bytes. Not infinite, because the collection does change: WhatsApp rebuilds
+// snapshots, patches accumulate, and an attempt that could not cross yesterday
+// may cross today. Four attempts a day is enough to catch that without the
+// account ever being ground at.
+const healRetryAfter = 6 * time.Hour
+
 // healProvenWedge reads a long-wedged label collection the lenient way.
 //
 // The condition is deliberately narrow, because this is the one path that
@@ -1269,8 +1279,16 @@ func (s *Session) healProvenWedge(ctx context.Context, reason string) {
 	if !wedgeIsProven(facts.StaleSince, time.Now()) {
 		return
 	}
-	if facts.UnverifiedAt != nil && !facts.UnverifiedAt.Before(w.since) {
-		return // already tried for this wedge
+	// One attempt per wedge, but never a permanent stop.
+	//
+	// The first version of this rule was "once per wedge" alone, and it locked
+	// CEREBRUM UTAMA out after an attempt that moved the version from 1226 to
+	// 1226 — a no-op, recorded as if it had been a go. A rule meant to prevent a
+	// loop had instead guaranteed a stall, which is the worse of the two.
+	if facts.UnverifiedAt != nil &&
+		!facts.UnverifiedAt.Before(w.since) &&
+		time.Since(*facts.UnverifiedAt) < healRetryAfter {
+		return
 	}
 
 	s.log.Warn("wedge has outlasted the confirmation window; reading the labels leniently",

@@ -126,18 +126,22 @@ func (m *Manager) ReadLabelsUnverified(
 		return nil, fmt.Errorf("susun peristiwa label: %w", err)
 	}
 
-	applied := 0
-	for _, evt := range collected {
-		switch evt.(type) {
-		case *events.LabelEdit, *events.LabelAssociationChat:
-			s.handleEvent(evt)
-			applied++
-		}
-		// Everything else the collection carries is deliberately dropped. In
-		// particular no AppStateSyncComplete is synthesised: that event marks
-		// the collection as properly read, which would clear the wedge and turn
-		// the indicator green over data nothing has vouched for.
-	}
+	applied := s.applyLabelEvents(collected)
+
+	// Crossing the broken link.
+	//
+	// The snapshot the server serves stops short of it. CEREBRUM UTAMA's
+	// snapshot replayed to v1226 — exactly where the stored version already was
+	// — because v1227, the patch that fails verification, is only ever handed
+	// over by an incremental fetch. Reading the snapshot alone therefore healed
+	// nothing: from 1226, to 1226.
+	//
+	// So after the snapshot we walk forward from wherever it left us, asking for
+	// the patches after that version and decoding them without verification,
+	// until the version stops moving. Each round is adopted before the next is
+	// asked for, so a walk that dies halfway still leaves the collection further
+	// along than it was.
+	applied += s.crossWedgedPatches(ctx, proc, name, state)
 
 	// Taken on only after the labels are in, so a decode that produced nothing
 	// cannot leave the store claiming to be caught up.
@@ -187,4 +191,88 @@ func unverifiedDetail(w wedgeState, mutations int, at time.Time) string {
 			"tidak bisa dibuktikan hanyalah keutuhan satu patch itu. Kalau WhatsApp tetap "+
 			"menolaknya, pesannya akan mengatakan begitu, bukan diam.",
 		at.Format("2 Jan 15:04"), mutations, w.patch)
+}
+
+// lenientCatchUpRounds bounds the walk forward.
+//
+// Each round costs one request and can only move the version forward, so the
+// bound is about never looping rather than about cost. Ten is far more than the
+// one or two broken links seen in practice, and a collection still behind after
+// ten is better reported than ground at.
+const lenientCatchUpRounds = 10
+
+// applyLabelEvents feeds decoded mutations through the ordinary event router.
+//
+// Everything the collection carries that is not a label is deliberately
+// dropped. In particular no AppStateSyncComplete is synthesised: that event
+// marks the collection as properly read, which would clear the wedge and turn
+// the indicator green over data nothing has vouched for.
+func (s *Session) applyLabelEvents(collected []any) int {
+	applied := 0
+	for _, evt := range collected {
+		switch evt.(type) {
+		case *events.LabelEdit, *events.LabelAssociationChat:
+			s.handleEvent(evt)
+			applied++
+		}
+	}
+	return applied
+}
+
+// crossWedgedPatches walks the collection forward past the patches that fail
+// verification, adopting each round before asking for the next.
+//
+// Returns how many label changes it carried across. The stored version is
+// written here rather than by the caller, because a walk that stops halfway
+// must still leave the collection at the furthest point it reached: the whole
+// problem being solved is a version that cannot get past one bad link, and
+// giving back the ground already gained would recreate it.
+func (s *Session) crossWedgedPatches(
+	ctx context.Context,
+	proc *appstate.Processor,
+	name appstate.WAPatchName,
+	from appstate.HashState,
+) int {
+	internals := s.client.DangerousInternals()
+	applied := 0
+	state := from
+
+	for round := 0; round < lenientCatchUpRounds; round++ {
+		list, err := internals.FetchAppStatePatches(ctx, name, state.Version, false)
+		if err != nil {
+			s.log.Warn("could not ask for the patches after the broken one",
+				"patch", name, "from_version", state.Version, "err", err)
+			return applied
+		}
+		if list == nil || len(list.Patches) == 0 {
+			return applied // nothing further to cross
+		}
+
+		mutations, next, err := proc.DecodePatches(ctx, list, state, false)
+		if err != nil {
+			s.log.Warn("could not decode the patches after the broken one even unverified",
+				"patch", name, "from_version", state.Version, "err", err)
+			return applied
+		}
+		if next.Version <= state.Version {
+			return applied // not moving; stop rather than ask again for the same
+		}
+
+		var collected []any
+		if err := internals.CollectEventsToDispatch(ctx, name, mutations, false, &collected); err != nil {
+			s.log.Warn("could not turn the crossed patches into events", "patch", name, "err", err)
+			return applied
+		}
+		applied += s.applyLabelEvents(collected)
+
+		if err := s.client.Store.AppState.PutAppStateVersion(
+			ctx, string(name), next.Version, next.Hash); err != nil {
+			s.log.Warn("could not adopt the crossed version", "patch", name, "err", err)
+			return applied
+		}
+		s.log.Warn("crossed a patch that fails verification",
+			"patch", name, "from", state.Version, "to", next.Version, "mutations", len(mutations))
+		state = next
+	}
+	return applied
 }
