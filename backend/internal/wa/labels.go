@@ -498,6 +498,23 @@ func (m *Manager) PushChatLabel(
 
 		err := send()
 		if wedgedCollection(err) {
+			// Except when the repair is already known not to work.
+			//
+			// The repair clears the stored version and asks the phone for a
+			// fresh copy. On a collection wedged at a patch WhatsApp itself
+			// cannot serve consistently, that answer never comes — CEREBRUM
+			// UTAMA was asked four times and replied none — so the sequence is:
+			// throw away a usable version, wait twenty seconds, fail the write
+			// anyway, and leave the account unable to write labels at all until
+			// the ninety second gate expires and puts the version back.
+			//
+			// Every part of that is worse than saying so immediately.
+			if w, ok := s.wedgedAt(appstate.WAPatchRegular); ok && w.patch > 0 {
+				s.log.Warn("not repairing a collection wedged at a known patch; the phone does not answer",
+					"wa_label_id", waID, "chat", jid.String(), "wedged_at", w.patch)
+				return offline(labelWedgedMessage), nil
+			}
+
 			// The collection is out of step rather than the write being wrong.
 			// Repair it and try the same write once more, so the operator's
 			// action lands instead of being handed back to them.
