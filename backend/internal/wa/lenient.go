@@ -30,12 +30,33 @@ import (
 //
 // Three things keep it honest:
 //
-//   - It is never automatic. Somebody chooses it, per number.
-//   - It writes nothing back to whatsmeow's state. The decode is side-effect
-//     free, and the stored version stays at whatever it was, so the ordinary
-//     verified path resumes the moment WhatsApp rebuilds its snapshot.
-//   - It is recorded as what it is, in its own column, and the indicator says
-//     `partial` rather than `synced` for as long as it stands.
+// Two of the three rails this started with have since been taken down on
+// purpose, and saying which, and why, matters more than the rails did.
+//
+//   - It is no longer manual. Waiting for somebody to notice a red box meant a
+//     number could sit unable to sync labels for a day, and the instruction was
+//     to have no label sync failures at all. It now runs by itself once a wedge
+//     has lasted half an hour, which is long enough to know it is not weather.
+//   - It no longer leaves the stored version alone. Reading was only half the
+//     feature: writing a label builds a patch on top of the stored version, and
+//     WhatsApp refuses anything built below its own. The numbers whose labelling
+//     works are exactly the ones whose version climbed past their broken link.
+//
+//     What this accepts unverified is smaller than it sounds. The chain is
+//     verified normally right up to the break — CEREBRUM UTAMA reached v1226
+//     against a break at v1227 on its own — so adopting the replayed version
+//     takes one patch on trust and returns the collection to the verified path
+//     beyond it. If the hash is wrong, writes are refused exactly as they are
+//     refused today; nothing is lost that was not already lost.
+//
+// What remains, and must:
+//
+//   - Only the labels collection, never the others.
+//   - Only a wedge that has outlasted wedgeConfirmAfter, and only once per
+//     wedge, so a collection cannot be read this way in a loop.
+//   - Recorded in its own column, never in labels_read_at, and the indicator
+//     says `partial` rather than `synced` for as long as it stands.
+//   - Replaced wholesale by the first verified read that succeeds.
 
 // ErrNotWedged refuses the bypass on a collection that does not need it.
 var ErrNotWedged = errors.New("wa: koleksi label tidak tersangkut, gunakan sinkron biasa")
@@ -88,7 +109,7 @@ func (m *Manager) ReadLabelsUnverified(
 	// function that this path never reaches, so nothing here can leave our
 	// stored state believing it holds something it cannot verify.
 	proc := appstate.NewProcessor(s.client.Store, s.client.Log.Sub("LenientAppState"))
-	mutations, _, err := proc.DecodePatches(ctx, list, appstate.HashState{}, false)
+	mutations, state, err := proc.DecodePatches(ctx, list, appstate.HashState{}, false)
 	if err != nil {
 		return nil, fmt.Errorf("dekode snapshot label tanpa verifikasi: %w", err)
 	}
@@ -118,6 +139,25 @@ func (m *Manager) ReadLabelsUnverified(
 		// the indicator green over data nothing has vouched for.
 	}
 
+	// Taken on only after the labels are in, so a decode that produced nothing
+	// cannot leave the store claiming to be caught up.
+	//
+	// This is the half that makes labelling possible again rather than merely
+	// visible, and it is the one place in the product where our stored
+	// app-state version comes from data nothing vouched for. Logged at warning
+	// level with both versions, so it is findable later without reading code.
+	if state.Version > 0 {
+		before, _, _ := s.client.Store.AppState.GetAppStateVersion(ctx, string(name))
+		if err := s.client.Store.AppState.PutAppStateVersion(
+			ctx, string(name), state.Version, state.Hash); err != nil {
+			s.log.Warn("could not adopt the version from the unverified read", "err", err)
+		} else {
+			s.log.Warn("adopted an app state version from an unverified read",
+				"patch", name, "from", before, "to", state.Version,
+				"wedged_at", w.patch, "mutations", applied)
+		}
+	}
+
 	count, err := m.repo.CountWhatsAppLabels(ctx, accountID)
 	if err != nil {
 		s.log.Warn("could not count labels after the unverified read", "err", err)
@@ -142,8 +182,9 @@ func (m *Manager) ReadLabelsUnverified(
 // from a read nothing vouched for.
 func unverifiedDetail(w wedgeState, mutations int, at time.Time) string {
 	return fmt.Sprintf(
-		"Label dibaca tanpa verifikasi pada %s (%d perubahan), sebab data WhatsApp sendiri "+
-			"tidak konsisten di patch v%d. Labelnya bisa dipakai di salesan, tetapi perubahan "+
-			"label dari sini belum tentu sampai ke HP sampai WhatsApp menyusun ulang datanya.",
+		"Label dipulihkan tanpa verifikasi pada %s (%d perubahan), sebab data WhatsApp sendiri "+
+			"tidak konsisten di patch v%d. Label bisa dibaca dan diubah seperti biasa; yang "+
+			"tidak bisa dibuktikan hanyalah keutuhan satu patch itu. Kalau WhatsApp tetap "+
+			"menolaknya, pesannya akan mengatakan begitu, bukan diam.",
 		at.Format("2 Jan 15:04"), mutations, w.patch)
 }

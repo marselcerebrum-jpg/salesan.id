@@ -889,6 +889,12 @@ func (s *Session) reconcileLabels(ctx context.Context, reason string) {
 	// and this is what a health check can be built on without being lied to.
 	s.recordLabelReadability(ctx, outcome)
 
+	// A wedge that has outlasted the confirmation window is healed here rather
+	// than waiting for somebody to notice it, because nobody was: a number sat
+	// unable to sync labels for a day while the warning box said so on a page
+	// that is not the page anyone works in.
+	s.healProvenWedge(ctx, reason)
+
 	switch {
 	case len(outcome.Errors) > 0:
 		detail := errorsJoin(outcome.Errors)
@@ -1233,4 +1239,48 @@ func labelIndicatorState(
 		// here would cry wolf on every pass for an account that works.
 		return LabelSyncSynced, ""
 	}
+}
+
+// healProvenWedge reads a long-wedged label collection the lenient way.
+//
+// The condition is deliberately narrow, because this is the one path that
+// accepts data WhatsApp will not vouch for:
+//
+//   - the labels collection is wedged at a patch version we know,
+//   - the run of failed reads has outlasted wedgeConfirmAfter, so it is not
+//     the ordinary weather that clears itself within minutes,
+//   - and no lenient read has happened since this wedge began, so a collection
+//     that stays wedged afterwards is not read this way over and over.
+//
+// The last condition is what keeps it to one attempt per wedge. If WhatsApp
+// later rebuilds its snapshot and breaks at a new version, that is a new wedge
+// with a later `since`, and it earns one attempt of its own.
+func (s *Session) healProvenWedge(ctx context.Context, reason string) {
+	w, ok := s.wedgedAt(appstate.WAPatchRegular)
+	if !ok || w.patch == 0 {
+		return
+	}
+
+	facts, err := s.mgr.repo.LabelReadFacts(ctx, s.AccountID)
+	if err != nil {
+		s.log.Warn("could not check whether this wedge is worth healing", "err", err)
+		return
+	}
+	if !wedgeIsProven(facts.StaleSince, time.Now()) {
+		return
+	}
+	if facts.UnverifiedAt != nil && !facts.UnverifiedAt.Before(w.since) {
+		return // already tried for this wedge
+	}
+
+	s.log.Warn("wedge has outlasted the confirmation window; reading the labels leniently",
+		"reason", reason, "wedged_at", w.patch, "since", w.since)
+
+	res, err := s.mgr.ReadLabelsUnverified(ctx, s.WorkspaceID, s.AccountID)
+	if err != nil {
+		s.log.Warn("lenient read of a proven wedge failed", "wedged_at", w.patch, "err", err)
+		return
+	}
+	s.log.Warn("labels recovered from a proven wedge",
+		"wedged_at", w.patch, "mutations", res.Mutations, "labels", res.Labels)
 }

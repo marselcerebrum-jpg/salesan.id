@@ -294,13 +294,29 @@ func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
 	if _, detail := labelIndicatorState(wedge, never, now); !strings.Contains(detail, "tidak menolong") {
 		t.Errorf("the wedge detail does not say re-pairing will not help: %q", detail)
 	}
-	// The partial sentence has to admit both halves of what it is: unverified,
-	// and one-way. An operator who reads only "label dibaca" will expect a
-	// label they set here to show up on the phone.
+	// The partial sentence has to admit what it is.
+	//
+	// It used to be required to say "belum tentu sampai ke HP", because the
+	// lenient read left the stored version alone and a label set here genuinely
+	// could not reach the phone. Once the read began adopting the version it
+	// replayed, that sentence became false, and a warning that is false is
+	// worse than no warning: an operator who reads it will not trust the one
+	// part that still matters.
+	//
+	// So the requirement moved rather than relaxed. What must be disclosed is
+	// that nothing vouched for the data, which patch is at fault, and that the
+	// doubt is real rather than rhetorical — and the sentence must still never
+	// claim the number is simply fine.
 	_, partial := labelIndicatorState(wedge, lenient, now)
-	for _, want := range []string{"tanpa verifikasi", "v1176", "belum tentu sampai ke HP"} {
+	for _, want := range []string{"tanpa verifikasi", "v1176", "tidak bisa dibuktikan"} {
 		if !strings.Contains(partial, want) {
 			t.Errorf("the partial detail omits %q: %q", want, partial)
+		}
+	}
+	for _, forbidden := range []string{"tersinkron", "aman", "terverifikasi penuh"} {
+		if strings.Contains(partial, forbidden) {
+			t.Errorf("the partial detail claims %q, which is the one thing it may not: %q",
+				forbidden, partial)
 		}
 	}
 }
