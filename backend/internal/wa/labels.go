@@ -547,8 +547,12 @@ func (m *Manager) PushChatLabel(
 			//
 			// Every part of that is worse than saying so immediately.
 			if w, ok := s.wedgedAt(appstate.WAPatchRegular); ok && w.patch > 0 {
+				// The refusal itself is logged, not just the fact of it. Without
+				// it there is no way to tell a 409 that means "you are behind"
+				// from one that means something else, and that was the question
+				// standing between a wedged number and working labels.
 				s.log.Warn("not repairing a collection wedged at a known patch; the phone does not answer",
-					"wa_label_id", waID, "chat", jid.String(), "wedged_at", w.patch)
+					"wa_label_id", waID, "chat", jid.String(), "wedged_at", w.patch, "err", err)
 				// Not labelWedgedMessage, which ends in "tekan Sinkron": that is
 				// the instruction this account has already disproved, and
 				// routing a wedged number to it would be the third time the same
