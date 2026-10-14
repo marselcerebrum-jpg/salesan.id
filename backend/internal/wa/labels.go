@@ -512,7 +512,16 @@ func (m *Manager) PushChatLabel(
 			if w, ok := s.wedgedAt(appstate.WAPatchRegular); ok && w.patch > 0 {
 				s.log.Warn("not repairing a collection wedged at a known patch; the phone does not answer",
 					"wa_label_id", waID, "chat", jid.String(), "wedged_at", w.patch)
-				return offline(labelWedgedMessage), nil
+				// Not labelWedgedMessage, which ends in "tekan Sinkron": that is
+				// the instruction this account has already disproved, and
+				// routing a wedged number to it would be the third time the same
+				// wrong advice reached somebody from a different place.
+				return offline(fmt.Sprintf(
+					"Label tidak bisa diubah dari salesan untuk nomor ini: data label di WhatsApp "+
+						"sendiri rusak di patch v%d, jadi WhatsApp menolak setiap perubahan. "+
+						"Menekan Sinkron dan memasangkan ulang HP tidak menolong — keduanya sudah "+
+						"dicoba. Ubah labelnya langsung di HP; salesan akan ikut sendiri begitu "+
+						"WhatsApp menyusun ulang datanya.", w.patch)), nil
 			}
 
 			// The collection is out of step rather than the write being wrong.
