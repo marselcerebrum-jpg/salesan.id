@@ -540,6 +540,24 @@ type LabelWedge struct {
 	Attempts int
 }
 
+// LabelsEverRead reports whether this number has ever decoded its label
+// collection.
+//
+// The question the badge was deciding without asking. "Synced" is a defensible
+// thing to say about a number whose label set is on screen and merely a refresh
+// behind; it is not a defensible thing to say about a number that has never
+// held a label, and the two were being settled by the same branch.
+func (r *Repo) LabelsEverRead(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	var ever bool
+	err := r.pool.QueryRow(ctx,
+		`select labels_read_at is not null from public.whatsapp_accounts where id = $1`,
+		accountID).Scan(&ever)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return ever, nil
+}
+
 // LoadLabelWedge reads back the wedge a previous session recorded.
 //
 // Read on connect, so a reconnect or a deploy does not hand a number that has

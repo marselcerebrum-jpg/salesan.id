@@ -2,6 +2,7 @@ package wa
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"time"
@@ -73,6 +74,20 @@ var wedgeBackoff = []time.Duration{
 	30 * time.Minute,
 	2 * time.Hour,
 	6 * time.Hour,
+}
+
+// wedgeDetail is the one sentence the operator reads about a wedge.
+//
+// One function because there are three places that have to say it — the badge
+// in the chat header, the row in the health notice, and the record a health
+// check reads — and three copies of a sentence is three chances for one of them
+// to go on telling somebody to re-pair a phone.
+func wedgeDetail(w wedgeState) string {
+	return fmt.Sprintf(
+		"Label tidak bisa dibaca: data label di WhatsApp sendiri tidak konsisten pada patch v%d. "+
+			"Memasangkan ulang HP dan menekan Sinkron tidak menolong. Akan dicoba lagi otomatis "+
+			"begitu WhatsApp menyusun ulang datanya; percobaan ke-%d sejak %s.",
+		w.patch, w.attempts, w.since.Format("2 Jan 15:04"))
 }
 
 // wedgeState is what one collection's wedge looks like from this session.

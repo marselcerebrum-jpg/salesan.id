@@ -867,18 +867,28 @@ func (s *Session) reconcileLabels(ctx context.Context, reason string) {
 
 		s.log.Warn("phone has not answered the label recovery; settling the indicator",
 			"reason", reason, "waited", waited.Round(time.Second))
-		_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSynced, "")
-		s.broadcastSyncState(ctx, LabelSyncSynced, "")
+		s.settleLabelIndicator(ctx)
+
+	case len(outcome.Wedged) > 0:
+		// Skipped on purpose, because the collection is stuck at a patch
+		// version already watched fail and its turn has not come round.
+		//
+		// This branch did not exist when the skip was added, so the pass fell
+		// through to `default` and announced a clean sync — which is how a
+		// number with no labels at all came to read "synced" with nothing in it.
+		s.log.Info("label reconciliation skipped a wedged collection",
+			"reason", reason, "patches", outcome.Wedged)
+		s.settleLabelIndicator(ctx)
 
 	case len(outcome.Stale) > 0:
-		// Could not refresh, but the stored state is intact and writable. Say
-		// synced rather than failed: the operator can still work, and claiming
-		// failure here would cry wolf on every pass for a wedged account.
+		// Could not refresh, but the stored state is intact and writable.
+		// Synced rather than failed, so the badge does not cry wolf on every
+		// pass — unless there is no stored state to be intact, which
+		// settleLabelIndicator is what checks.
 		s.log.Info("label reconciliation kept existing state",
 			"reason", reason, "patches", outcome.Stale)
 		s.labelRecoverySince.Store(0)
-		_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, LabelSyncSynced, "")
-		s.broadcastSyncState(ctx, LabelSyncSynced, "")
+		s.settleLabelIndicator(ctx)
 
 	default:
 		s.labelRecoverySince.Store(0)
@@ -925,11 +935,7 @@ func (s *Session) recordLabelReadability(ctx context.Context, outcome appStateOu
 	// v1176 was refused within seconds. Naming the patch version is what lets
 	// anyone recognise the second occurrence as the same one.
 	case wedged != nil:
-		reason = fmt.Sprintf(
-			"data label di WhatsApp sendiri tidak konsisten pada patch v%d, jadi tidak bisa dibaca. "+
-				"Memasangkan ulang HP tidak menolong. Akan dicoba lagi otomatis begitu WhatsApp "+
-				"menyusun ulang datanya; percobaan ke-%d sejak %s",
-			wedged.patch, wedged.attempts, wedged.since.Format("2 Jan 15:04"))
+		reason = wedgeDetail(*wedged)
 	case len(outcome.Errors) > 0:
 		reason = errorsJoin(outcome.Errors)
 	case slices.Contains(outcome.Recovering, name):
@@ -1082,4 +1088,55 @@ func (m *Manager) ResetLabelCollection(ctx context.Context, accountID uuid.UUID)
 // until the phone answers a question whose answer is already known.
 func clearingCouldHelp(failures int, fullSync bool) bool {
 	return failures >= appStateForceAfter && !fullSync
+}
+
+// settleLabelIndicator ends a pass that did not read the labels.
+//
+// "Synced" is a defensible thing to say about a number whose label set is on
+// screen and merely a refresh behind. It is not defensible for a number that
+// has never held a label, and until now one branch settled both: CEREBRUM UTAMA
+// read "synced" with labels_read_at null, zero labels stored, and a collection
+// wedged at v1176 — the exact lie labels_read_at was added to expose, told by
+// the badge that column was meant to keep honest.
+//
+// So the claim is checked against the two facts that decide it: whether the
+// collection is wedged, and whether it has ever been read at all.
+func (s *Session) settleLabelIndicator(ctx context.Context) {
+	var wedged *wedgeState
+	if w, ok := s.wedgedAt(appstate.WAPatchRegular); ok && w.patch > 0 {
+		wedged = &w
+	}
+
+	// Unknown counts as read. Inventing a failure out of a database error would
+	// put a red badge on a number that is probably fine.
+	everRead := true
+	if ever, err := s.mgr.repo.LabelsEverRead(ctx, s.AccountID); err != nil {
+		s.log.Warn("could not check whether labels were ever read", "err", err)
+	} else {
+		everRead = ever
+	}
+
+	state, detail := labelIndicatorState(wedged, everRead)
+	_ = s.mgr.repo.SetLabelSyncState(ctx, s.AccountID, state, detail)
+	s.broadcastSyncState(ctx, state, detail)
+}
+
+// labelIndicatorState decides what the badge may claim after a pass that did
+// not read the labels.
+//
+// Separated from the writing of it so the rule can be tested, because the rule
+// is what was wrong: one branch settled both "your label set is a refresh
+// behind" and "this number has never held a label" to the same cheerful word.
+func labelIndicatorState(wedged *wedgeState, everRead bool) (state, detail string) {
+	switch {
+	case wedged != nil:
+		return LabelSyncFailed, wedgeDetail(*wedged)
+	case !everRead:
+		return LabelSyncFailed, "Label belum pernah berhasil dibaca dari nomor ini. " +
+			"Buka WhatsApp di HP nomor ini, biarkan terbuka, lalu tekan Sinkron."
+	default:
+		// A set is on screen and a refresh is merely outstanding. Saying failed
+		// here would cry wolf on every pass for an account that works.
+		return LabelSyncSynced, ""
+	}
 }

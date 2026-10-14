@@ -3,6 +3,7 @@ package wa
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,67 @@ func TestASuccessfulReadForgetsTheWedge(t *testing.T) {
 	}
 	if _, act := s.noteWedge(name, 1176, t0.Add(time.Second)); !act {
 		t.Error("a failure after a successful read was treated as a continuation")
+	}
+}
+
+// The lie this whole mechanism exists to prevent, told by the badge itself.
+//
+// CEREBRUM UTAMA read "synced" on 14 October with labels_read_at null, zero
+// labels stored, and its collection wedged at v1176. One branch was settling
+// two different situations to the same cheerful word: "your label set is a
+// refresh behind" and "this number has never held a label".
+func TestTheBadgeMayNotClaimSyncedWithoutHavingRead(t *testing.T) {
+	wedge := &wedgeState{
+		patch:    1176,
+		since:    time.Date(2026, 10, 14, 1, 56, 0, 0, time.UTC),
+		attempts: 2,
+	}
+
+	tests := []struct {
+		name     string
+		wedged   *wedgeState
+		everRead bool
+		want     string
+	}{
+		// The case that was wrong, in both of its forms.
+		{"wedged and never read", wedge, false, LabelSyncFailed},
+		{"never read", nil, false, LabelSyncFailed},
+
+		// Wedged but holding a set from before. Still not synced: the set is
+		// frozen at the patch before the wedge and will not move again until
+		// WhatsApp rebuilds, which is a different thing from being up to date.
+		// JADIBUMN HP IKLAN is this, with 25 labels stuck at v488.
+		{"wedged but has read before", wedge, true, LabelSyncFailed},
+
+		// The one case that may claim it: a set is on screen and a refresh is
+		// merely outstanding. Saying failed here would cry wolf every ten
+		// minutes on an account that works.
+		{"read before and not wedged", nil, true, LabelSyncSynced},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state, detail := labelIndicatorState(tt.wedged, tt.everRead)
+			if state != tt.want {
+				t.Errorf("state = %q, want %q", state, tt.want)
+			}
+			if state == LabelSyncFailed && strings.TrimSpace(detail) == "" {
+				t.Error("a failed badge with nothing to read is the silence this replaced")
+			}
+			if state == LabelSyncSynced && detail != "" {
+				t.Errorf("a synced badge carries an explanation: %q", detail)
+			}
+		})
+	}
+
+	// The wedge sentence has to carry the patch version, because that number is
+	// what lets anybody tell a repeat from a new problem.
+	if _, detail := labelIndicatorState(wedge, false); !strings.Contains(detail, "v1176") {
+		t.Errorf("the wedge detail does not name the patch version: %q", detail)
+	}
+	// And it must not tell anyone to re-pair. That instruction was wrong, was
+	// acted on, and cost a QR scan.
+	if _, detail := labelIndicatorState(wedge, false); !strings.Contains(detail, "tidak menolong") {
+		t.Errorf("the wedge detail does not say re-pairing will not help: %q", detail)
 	}
 }
