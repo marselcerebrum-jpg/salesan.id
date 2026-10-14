@@ -199,13 +199,35 @@ func (m *Manager) RevokeMessage(ctx context.Context, workspaceID, messageID uuid
 		}
 	}
 
+	// The other half of the same question: what we send, beside what we could
+	// have sent. A revoke that WhatsApp accepts and then ignores produces no
+	// error at all, so without this the only evidence of the failure is an
+	// operator noticing the message is still there.
+	//
+	// The phone form is resolved only to be logged. Nothing is changed on the
+	// strength of a guess; the two logs together say which form is right.
+	altForm := ""
+	if !sender.IsEmpty() {
+		altForm = s.phoneJID(ctx, sender)
+	}
+	s.log.Info("sending a revoke",
+		"wa_id", target.WAMessageID,
+		"chat", chatJID.String(),
+		"target_from_me", target.FromMe,
+		"stored_sender", target.SenderJID,
+		"participant_sent", sender.ToNonAD().String(),
+		"participant_phone_form", altForm)
+
 	// WhatsApp only lets you revoke someone else's message as a group admin,
 	// and rejects it otherwise. The rejection is surfaced rather than swallowed
 	// so the operator is not left thinking it worked.
-	if _, err := s.client.SendMessage(ctx, chatJID,
-		s.client.BuildRevoke(chatJID, sender, types.MessageID(target.WAMessageID))); err != nil {
+	resp, err := s.client.SendMessage(ctx, chatJID,
+		s.client.BuildRevoke(chatJID, sender, types.MessageID(target.WAMessageID)))
+	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotRevocable, err)
 	}
+	s.log.Info("revoke accepted by the server",
+		"wa_id", target.WAMessageID, "revoke_id", resp.ID, "server_ts", resp.Timestamp)
 
 	updated, keys, err := m.repo.RevokeMessage(ctx, target.AccountID, target.WAMessageID, time.Now().UTC())
 	if err != nil {
@@ -358,6 +380,28 @@ func (s *Session) handleMessageRevoke(ctx context.Context, evt *events.Message) 
 	targetID := protocol.GetKey().GetID()
 	if targetID == "" {
 		return
+	}
+
+	// What WhatsApp itself puts in a revoke key.
+	//
+	// Our own revokes of somebody else's message in a group appear to be
+	// accepted and then ignored, and the one thing we cannot read out of the
+	// code is which form of the sender's address the key is matched on: we
+	// store group senders exclusively as LIDs — 39,313 of 39,313 over a week —
+	// and send that, which may simply not be what the key is keyed by.
+	//
+	// Logged on the incoming side rather than waited for on the outgoing one
+	// because the incoming side is busy: 1,601 of these arrived in seven days,
+	// every one of them an example of the shape WhatsApp considers correct.
+	if key := protocol.GetKey(); key != nil {
+		s.log.Info("incoming revoke key, as WhatsApp sent it",
+			"wa_id", targetID,
+			"key_from_me", key.GetFromMe(),
+			"key_participant", key.GetParticipant(),
+			"key_remote_jid", key.GetRemoteJID(),
+			"evt_sender", evt.Info.Sender.String(),
+			"evt_addressing_mode", string(evt.Info.AddressingMode),
+			"evt_is_group", evt.Info.IsGroup)
 	}
 
 	updated, keys, err := s.mgr.repo.RevokeMessage(ctx, s.AccountID, targetID, evt.Info.Timestamp)
