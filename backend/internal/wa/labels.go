@@ -1244,12 +1244,12 @@ func labelIndicatorState(
 // healRetryAfter is how long before a wedge that survived one lenient read is
 // offered another.
 //
-// Long, because a second attempt on an unchanged collection reads the same
-// bytes. Not infinite, because the collection does change: WhatsApp rebuilds
-// snapshots, patches accumulate, and an attempt that could not cross yesterday
-// may cross today. Four attempts a day is enough to catch that without the
-// account ever being ground at.
-const healRetryAfter = 6 * time.Hour
+// Long enough that a second attempt on an unchanged collection is not reading
+// the same bytes minutes later. Short enough that nothing is ever stuck for a
+// working day: the collection does change — WhatsApp rebuilds snapshots and
+// patches accumulate — so an attempt that could not cross this morning may
+// cross this afternoon. Twelve attempts a day catches that without grinding.
+const healRetryAfter = 2 * time.Hour
 
 // healProvenWedge reads a long-wedged label collection the lenient way.
 //

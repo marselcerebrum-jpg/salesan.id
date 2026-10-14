@@ -93,40 +93,38 @@ func (m *Manager) ReadLabelsUnverified(
 	}
 
 	name := appstate.WAPatchRegular
-	internals := s.client.DangerousInternals()
-
-	// From version zero with the snapshot, which is the only form that can
-	// carry a whole collection. An incremental fetch would hand back the
-	// patches after our stored version, and on this account that version is
-	// zero anyway.
-	list, err := internals.FetchAppStatePatches(ctx, name, 0, true)
-	if err != nil {
-		return nil, fmt.Errorf("ambil snapshot label: %w", err)
-	}
-
-	// Its own processor over the same device store. DecodePatches reads keys and
-	// returns mutations; the writing of versions and MACs lives in a different
-	// function that this path never reaches, so nothing here can leave our
-	// stored state believing it holds something it cannot verify.
 	proc := appstate.NewProcessor(s.client.Store, s.client.Log.Sub("LenientAppState"))
-	mutations, state, err := proc.DecodePatches(ctx, list, appstate.HashState{}, false)
+
+	// Where to start from, and this is the whole difference between working and
+	// not.
+	//
+	// A collection with nothing stored needs the snapshot: it is the only form
+	// that carries a whole collection, and it is what gave CEREBRUM UTAMA its
+	// first 3,419 label changes when it held none.
+	//
+	// A collection that already has a version must NOT be replayed from the
+	// snapshot. Twice over: the MACs it would re-insert are already there, and
+	// the snapshot the server serves stops short of the broken link anyway —
+	// CEREBRUM UTAMA replayed to v1226 from a stored v1226 and healed nothing.
+	// The patch that fails verification is only ever handed over by an
+	// incremental fetch, so that is where to go looking for it.
+	stored, storedHash, err := s.client.Store.AppState.GetAppStateVersion(ctx, string(name))
 	if err != nil {
-		return nil, fmt.Errorf("dekode snapshot label tanpa verifikasi: %w", err)
+		return nil, fmt.Errorf("baca versi tersimpan: %w", err)
 	}
 
-	s.log.Warn("decoded the label collection without verifying WhatsApp's MACs",
-		"patch", name, "wedged_at", w.patch, "mutations", len(mutations))
+	applied := 0
+	state := appstate.HashState{Version: stored, Hash: storedHash}
 
-	// Turned into the same events the verified path produces, then fed through
-	// the same router. The alternative was a second way to apply a label
-	// change, which is a second place for the rules about ordering and
-	// deletion to drift.
-	var collected []any
-	if err := internals.CollectEventsToDispatch(ctx, name, mutations, true, &collected); err != nil {
-		return nil, fmt.Errorf("susun peristiwa label: %w", err)
+	if stored == 0 {
+		applied, state, err = s.replaySnapshotUnverified(ctx, proc, name)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	applied := s.applyLabelEvents(collected)
+	s.log.Warn("reading the label collection without verifying WhatsApp's MACs",
+		"patch", name, "wedged_at", w.patch, "from_version", state.Version)
 
 	// Crossing the broken link.
 	//
@@ -141,7 +139,8 @@ func (m *Manager) ReadLabelsUnverified(
 	// until the version stops moving. Each round is adopted before the next is
 	// asked for, so a walk that dies halfway still leaves the collection further
 	// along than it was.
-	applied += s.crossWedgedPatches(ctx, proc, name, state)
+	crossed, state := s.crossWedgedPatches(ctx, proc, name, state)
+	applied += crossed
 
 	// Taken on only after the labels are in, so a decode that produced nothing
 	// cannot leave the store claiming to be caught up.
@@ -150,16 +149,18 @@ func (m *Manager) ReadLabelsUnverified(
 	// visible, and it is the one place in the product where our stored
 	// app-state version comes from data nothing vouched for. Logged at warning
 	// level with both versions, so it is findable later without reading code.
-	if state.Version > 0 {
-		before, _, _ := s.client.Store.AppState.GetAppStateVersion(ctx, string(name))
+	if state.Version > stored {
 		if err := s.client.Store.AppState.PutAppStateVersion(
 			ctx, string(name), state.Version, state.Hash); err != nil {
 			s.log.Warn("could not adopt the version from the unverified read", "err", err)
 		} else {
 			s.log.Warn("adopted an app state version from an unverified read",
-				"patch", name, "from", before, "to", state.Version,
+				"patch", name, "from", stored, "to", state.Version,
 				"wedged_at", w.patch, "mutations", applied)
 		}
+	} else {
+		s.log.Warn("the unverified read did not move the collection forward",
+			"patch", name, "version", state.Version, "wedged_at", w.patch)
 	}
 
 	count, err := m.repo.CountWhatsAppLabels(ctx, accountID)
@@ -232,7 +233,7 @@ func (s *Session) crossWedgedPatches(
 	proc *appstate.Processor,
 	name appstate.WAPatchName,
 	from appstate.HashState,
-) int {
+) (int, appstate.HashState) {
 	internals := s.client.DangerousInternals()
 	applied := 0
 	state := from
@@ -242,37 +243,69 @@ func (s *Session) crossWedgedPatches(
 		if err != nil {
 			s.log.Warn("could not ask for the patches after the broken one",
 				"patch", name, "from_version", state.Version, "err", err)
-			return applied
+			return applied, state
 		}
 		if list == nil || len(list.Patches) == 0 {
-			return applied // nothing further to cross
+			return applied, state // nothing further to cross
 		}
 
 		mutations, next, err := proc.DecodePatches(ctx, list, state, false)
 		if err != nil {
 			s.log.Warn("could not decode the patches after the broken one even unverified",
 				"patch", name, "from_version", state.Version, "err", err)
-			return applied
+			return applied, state
 		}
 		if next.Version <= state.Version {
-			return applied // not moving; stop rather than ask again for the same
+			return applied, state // not moving; stop rather than ask again for the same
 		}
 
 		var collected []any
 		if err := internals.CollectEventsToDispatch(ctx, name, mutations, false, &collected); err != nil {
 			s.log.Warn("could not turn the crossed patches into events", "patch", name, "err", err)
-			return applied
+			return applied, state
 		}
 		applied += s.applyLabelEvents(collected)
 
 		if err := s.client.Store.AppState.PutAppStateVersion(
 			ctx, string(name), next.Version, next.Hash); err != nil {
 			s.log.Warn("could not adopt the crossed version", "patch", name, "err", err)
-			return applied
+			return applied, state
 		}
 		s.log.Warn("crossed a patch that fails verification",
 			"patch", name, "from", state.Version, "to", next.Version, "mutations", len(mutations))
 		state = next
 	}
-	return applied
+	return applied, state
+}
+
+// replaySnapshotUnverified rebuilds a collection that has nothing stored.
+//
+// Only for a stored version of zero. Over a collection that already holds
+// mutation MACs this fails on the duplicates storeMACs tries to insert, and
+// the snapshot would stop short of the broken link in any case.
+func (s *Session) replaySnapshotUnverified(
+	ctx context.Context,
+	proc *appstate.Processor,
+	name appstate.WAPatchName,
+) (int, appstate.HashState, error) {
+	internals := s.client.DangerousInternals()
+
+	list, err := internals.FetchAppStatePatches(ctx, name, 0, true)
+	if err != nil {
+		return 0, appstate.HashState{}, fmt.Errorf("ambil snapshot label: %w", err)
+	}
+
+	mutations, state, err := proc.DecodePatches(ctx, list, appstate.HashState{}, false)
+	if err != nil {
+		return 0, appstate.HashState{}, fmt.Errorf("dekode snapshot label tanpa verifikasi: %w", err)
+	}
+
+	// Turned into the same events the verified path produces, then fed through
+	// the same router. A second way to apply a label change would be a second
+	// place for the rules about ordering and deletion to drift.
+	var collected []any
+	if err := internals.CollectEventsToDispatch(ctx, name, mutations, true, &collected); err != nil {
+		return 0, appstate.HashState{}, fmt.Errorf("susun peristiwa label: %w", err)
+	}
+	return s.applyLabelEvents(collected), state, nil
 }
