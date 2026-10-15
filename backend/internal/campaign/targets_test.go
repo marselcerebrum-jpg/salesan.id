@@ -2,6 +2,7 @@ package campaign
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -258,6 +259,87 @@ func TestPlanNeverMarshalsNullSlices(t *testing.T) {
 		}
 		if _, ok := v.([]any); !ok {
 			t.Fatalf("%s is %T, not an array", key, v)
+		}
+	}
+}
+
+// The numbers that were actually broadcast to nobody.
+//
+// Every one of these came out of a real campaign and out of the log line the
+// operator saw: `no LID found for 8977991661@s.whatsapp.net from server`. They
+// are Indonesian mobiles typed without the trunk zero, which the normaliser
+// read as country code 89, 87, 85 and 82 — none of which is assigned to
+// anywhere. Eleven of sixty-two targets in a month went this way.
+func TestAnIndonesianNumberTypedWithoutItsZeroStillReachesSomebody(t *testing.T) {
+	fromProduction := map[string]string{
+		"8977991661":  "628977991661",
+		"87739192482": "6287739192482",
+		"82292665281": "6282292665281",
+		"87885718283": "6287885718283",
+		"85836330931": "6285836330931",
+		"82138362231": "6282138362231",
+		// The same number, typed the three ways it is typed, must still collapse
+		// to one recipient — otherwise the fix buys a duplicate send.
+		"08977991661":    "628977991661",
+		"628977991661":   "628977991661",
+		"+62897799166 1": "628977991661",
+	}
+	for in, want := range fromProduction {
+		got, err := NormalizeMSISDN(in)
+		if err != nil {
+			t.Errorf("%q: unexpected error %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The narrowness is the safety. A number marked as international by its typist
+// is never reinterpreted, whatever it starts with.
+func TestAMarkedInternationalNumberIsNeverReadAsIndonesian(t *testing.T) {
+	untouched := map[string]string{
+		// Japan and South Korea share the leading 8 that the rule keys on.
+		// Written with a + or 00, they must pass through exactly as given.
+		"+819012345678":  "819012345678",
+		"00819012345678": "819012345678",
+		"+821012345678":  "821012345678",
+		"+84912345678":   "84912345678",
+		// Malaysia, the case the original comment was written for.
+		"+60123456789": "60123456789",
+		"60123456789":  "60123456789",
+		// Already Indonesian in full form, with and without the plus.
+		"+6281234567890": "6281234567890",
+		"6281234567890":  "6281234567890",
+	}
+	for in, want := range untouched {
+		got, err := NormalizeMSISDN(in)
+		if err != nil {
+			t.Errorf("%q: unexpected error %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%q was rewritten to %q; it was marked international", in, got)
+		}
+	}
+
+	// And a bare 8 outside the lengths an Indonesian mobile actually has is left
+	// alone rather than guessed at.
+	//
+	// The first draft of this check named "860123456789" as a number that must
+	// not be rewritten, on the reasoning that 86 is China. That was wrong, and
+	// wrong in the direction that matters: twelve digits after the 8 is an
+	// ordinary Indonesian length, so refusing it would have left exactly the
+	// numbers this exists to rescue. The real boundary is length, and these are
+	// the lengths no Indonesian mobile has.
+	for _, in := range []string{"81234567", "8123456789012345"} {
+		got, err := NormalizeMSISDN(in)
+		if err != nil {
+			continue // refused outright is also fine
+		}
+		if strings.HasPrefix(got, "62") {
+			t.Errorf("%q was read as Indonesian (%q) despite its length", in, got)
 		}
 	}
 }

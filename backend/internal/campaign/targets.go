@@ -53,6 +53,10 @@ func NormalizeMSISDN(raw string) (string, error) {
 	}
 
 	national := strings.HasPrefix(trimmed, "0") && !strings.HasPrefix(trimmed, "00")
+	// Whether the typist said, in any way at all, "this is an international
+	// number". A leading + or 00 is that statement, and it is respected
+	// absolutely: everything below only ever fires on a bare string of digits.
+	international := strings.HasPrefix(trimmed, "+")
 	only := digits.ReplaceAllString(trimmed, "")
 
 	switch {
@@ -62,6 +66,8 @@ func NormalizeMSISDN(raw string) (string, error) {
 		only = "62" + strings.TrimLeft(only, "0")
 	case strings.HasPrefix(only, "00"):
 		only = strings.TrimPrefix(only, "00")
+	case !international && looksLikeTrunklessIndonesian(only):
+		only = "62" + only
 	}
 
 	// A country code plus a subscriber number. Shorter is a typo or a service
@@ -70,6 +76,37 @@ func NormalizeMSISDN(raw string) (string, error) {
 		return "", fmt.Errorf("panjang nomor tidak wajar (%d digit)", len(only))
 	}
 	return only, nil
+}
+
+// looksLikeTrunklessIndonesian reports whether a bare number is an Indonesian
+// mobile that lost its leading zero.
+//
+// Eleven of sixty-two broadcast targets in a month were this, and every one of
+// them was sent to nobody: "8977991661" was read as country code 89, which is
+// not assigned to anywhere, and WhatsApp answered `no LID found`. The operator
+// saw "Gagal" against a number that looked perfectly correct to them, because
+// on a phone keypad it is — they simply had not typed the 0.
+//
+// The rule is narrow on purpose, and the narrowness is what makes it safe:
+//
+//   - It never fires on a number the typist marked as international. A leading
+//     + or 00 is handled above and this case is never reached, so a genuine
+//     Japanese +81 or Korean +82 number passes through untouched.
+//   - It only fires on a leading 8, which is where every Indonesian mobile
+//     prefix lives once the trunk zero is gone: 81x through 89x.
+//   - It only fires at the lengths those numbers actually have — nine to
+//     eleven digits after the 8.
+//
+// What remains is a bare "81…" or "82…" of that length, which could in theory
+// be a Japanese or Korean number typed without any international marker at all.
+// In this workspace that has never happened; forgetting the zero happens
+// eighteen times in a hundred. The preview shows the number that will actually
+// be dialled, so the reading is visible before anything is sent.
+func looksLikeTrunklessIndonesian(only string) bool {
+	if !strings.HasPrefix(only, "8") {
+		return false
+	}
+	return len(only) >= 10 && len(only) <= 12
 }
 
 // personalJID builds the one-to-one address for a normalised number.
