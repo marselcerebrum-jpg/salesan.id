@@ -89,9 +89,9 @@ func NormalizeMSISDN(raw string) (string, error) {
 //
 // The rule is narrow on purpose, and the narrowness is what makes it safe:
 //
-//   - It never fires on a number the typist marked as international. A leading
-//     + or 00 is handled above and this case is never reached, so a genuine
-//     Japanese +81 or Korean +82 number passes through untouched.
+//   - It never fires on a number the typist marked as international. A plus or
+//     a 00 prefix is handled above and this case is never reached, so a
+//     genuine Japanese or Korean number passes through untouched.
 //   - It only fires on a leading 8, which is where every Indonesian mobile
 //     prefix lives once the trunk zero is gone: 81x through 89x.
 //   - It only fires at the lengths those numbers actually have — nine to
