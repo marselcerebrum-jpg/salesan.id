@@ -23,7 +23,9 @@ import { Modal } from '@/components/ui/Modal';
 import { inputClassSm } from '@/components/ui/control';
 import {
   deleteSchedule,
+  errorMessage,
   fetcher,
+  isNetworkError,
   orgMembersPath,
   saveSchedule,
   schedulesPath,
@@ -219,11 +221,8 @@ export default function WorkHoursPage() {
         {schedules.error || org.error ? (
           <div className="mt-5">
             <ErrorState
-              message={
-                (schedules.error ?? org.error) instanceof Error
-                  ? ((schedules.error ?? org.error) as Error).message
-                  : 'Gagal memuat.'
-              }
+              message={errorMessage(schedules.error ?? org.error)}
+              transient={isNetworkError(schedules.error ?? org.error)}
               onRetry={() => {
                 void schedules.mutate();
                 void org.mutate();

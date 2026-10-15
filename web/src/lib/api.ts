@@ -52,6 +52,7 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').rep
 
 /** An error carrying the backend's machine-readable code and HTTP status. */
 export class ApiError extends Error {
+  /** HTTP status, or 0 when the request never reached the server at all. */
   readonly status: number;
   readonly code: string;
   readonly data: unknown;
@@ -63,6 +64,23 @@ export class ApiError extends Error {
     this.code = code;
     this.data = data;
   }
+}
+
+/**
+ * Whether a thrown error means the request never reached the server.
+ *
+ * Status 0 is reserved for exactly that. Screens use it to tell "nobody
+ * answered, and it is already being retried" apart from "the server answered
+ * and said no", which need opposite reactions from whoever is reading.
+ */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 0;
+}
+
+/** The sentence to show for any thrown error, in the product's own language. */
+export function errorMessage(err: unknown, fallback = 'Gagal memuat.'): string {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
 
 async function accessToken(): Promise<string | null> {
@@ -78,7 +96,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body) headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const res = await fetch(`${API_URL}/api/v1${path}`, { ...init, headers });
+  // A fetch that never reaches the server rejects with `TypeError: Failed to
+  // fetch`, and that string was going straight to the screen: English, with no
+  // hint of what to do, under a heading saying the data failed to load. It is
+  // also the least permanent failure there is — a backend restart drops the
+  // connections in flight, and the one after it succeeds.
+  //
+  // So it is named for what it is, in the language the rest of the product
+  // speaks, and it says that trying again is already happening, because SWR
+  // retries on its own and the screen should not imply otherwise.
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/v1${path}`, { ...init, headers });
+  } catch (err) {
+    throw new ApiError(
+      0,
+      'network_error',
+      'Koneksi ke server terputus sesaat. Menyambung ulang sendiri…',
+      err,
+    );
+  }
 
   if (res.status === 204) return undefined as T;
 

@@ -270,7 +270,43 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
  * could not find out what happened today" are different, and rendering the
  * second as the first is worse than showing nothing.
  */
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorState({
+  message,
+  onRetry,
+  transient = false,
+}: {
+  message: string;
+  onRetry?: () => void;
+  /**
+   * The request never reached the server, rather than the server refusing it.
+   *
+   * Worth its own treatment because the two call for opposite reactions. A
+   * refusal needs somebody to look at it; a dropped connection is almost always
+   * a backend restart, resolves by itself within seconds, and is already being
+   * retried. Painting the second in alarm red taught people to distrust the
+   * colour on the occasions it meant something.
+   */
+  transient?: boolean;
+}) {
+  if (transient) {
+    return (
+      <div className="rounded-card border border-hairline bg-surface-sunken px-4 py-5 text-center">
+        <RotateCcw className="mx-auto size-5 animate-spin text-ink-muted" />
+        <p className="mt-2 text-sm font-medium text-ink-soft">Menyambung ulang…</p>
+        <p className="mt-1 text-xs text-ink-muted">{message}</p>
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface-raised px-3 py-1.5 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-sunken"
+          >
+            Coba sekarang
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-card border border-danger/25 bg-danger-soft px-4 py-5 text-center">
       <AlertTriangle className="mx-auto size-5 text-danger" />
