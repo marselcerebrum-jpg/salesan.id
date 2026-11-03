@@ -1,10 +1,13 @@
 'use client';
 
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Download, X } from 'lucide-react';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 
 import { AppMark } from '@/components/accounts/AccountCard';
+import { ExportChatDialog, type ExportResult } from '@/components/chat/ExportChatDialog';
+import { Button } from '@/components/ui/Button';
 import { EmptyState, Spinner } from '@/components/ui/Primitives';
 import { fetcher } from '@/lib/api';
 import type { Application } from '@/lib/types';
@@ -15,15 +18,61 @@ export default function ChatApplicationsPage() {
     refreshInterval: 30_000,
   });
   const applications = data?.applications ?? [];
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exported, setExported] = useState<ExportResult | null>(null);
+
+  // The confirmation stays long enough to read, then gets out of the way.
+  useEffect(() => {
+    if (!exported) return;
+    const timer = setTimeout(() => setExported(null), 8000);
+    return () => clearTimeout(timer);
+  }, [exported]);
 
   return (
     <div className="px-5 py-6 lg:px-8 lg:py-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink">Chat</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Pilih aplikasi untuk melihat percakapannya.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink">Chat</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            Pilih aplikasi untuk melihat percakapannya.
+          </p>
+        </div>
+        <Button
+          icon={<Download className="size-4" />}
+          onClick={() => setExportOpen(true)}
+          disabled={applications.length === 0}
+        >
+          Export Chat
+        </Button>
       </header>
+
+      {exported ? (
+        <div
+          role="status"
+          className="mt-4 flex items-start justify-between gap-3 rounded-control border border-brand-600/25 bg-brand-600/8 px-3 py-2 text-sm text-brand-700"
+        >
+          <p className="min-w-0 break-words">
+            File <span className="font-medium">{exported.filename}</span> berhasil dibuat dan
+            diunduh
+            {exported.rows !== null ? ` — ${exported.rows.toLocaleString('id-ID')} pesan` : ''}.
+          </p>
+          <button
+            type="button"
+            onClick={() => setExported(null)}
+            aria-label="Tutup notifikasi"
+            className="-mr-1 shrink-0 rounded p-0.5 hover:bg-brand-600/10"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      ) : null}
+
+      <ExportChatDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        applications={applications}
+        onExported={setExported}
+      />
 
       {isLoading ? (
         <Spinner label="Memuat aplikasi…" />

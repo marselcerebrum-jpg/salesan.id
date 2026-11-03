@@ -376,6 +376,7 @@ kedua). Batas ukuran: foto 16 MB, video 64 MB, audio 16 MB, dokumen 100 MB.
 | `GET·POST` | `/labels` | daftar / tambah label |
 | `DELETE` | `/labels/{id}` | hapus label |
 | `GET` | `/contacts` | buku alamat |
+| `GET` | `/chats/export` | semua pesan dalam periode sebagai `.xlsx`; `start_date`, `end_date` (WIB, `YYYY-MM-DD`, inklusif), `application_id`, `account_ids` (dipisah koma), `type` = `all`/`personal`/`group` |
 | `GET` | `/ws?token=…` | WebSocket realtime |
 | `GET` | `/health` | health check (tanpa auth) |
 

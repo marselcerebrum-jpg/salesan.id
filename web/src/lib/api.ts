@@ -2042,6 +2042,69 @@ export async function exportContacts(q: ContactQuery = {}): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+/** The filter behind one chat export. Empty application or numbers mean all. */
+export interface ChatExportQuery {
+  application_id?: string;
+  account_ids?: string[];
+  /** WIB calendar dates, YYYY-MM-DD, both inclusive. */
+  start_date: string;
+  end_date: string;
+  type: 'all' | 'personal' | 'group';
+}
+
+/**
+ * Downloads every message matching the filter as an .xlsx.
+ *
+ * Unlike the other downloads, a refusal keeps the server's own sentence and
+ * code: "no messages in this period" is an answer the dialog shows as such,
+ * not as a failure. The workbook is complete when this resolves — the server
+ * builds it fully before sending a byte.
+ */
+export async function exportChats(q: ChatExportQuery): Promise<{ filename: string; rows: number | null }> {
+  const token = await accessToken();
+  const headers = new Headers();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const search = toSearch({
+    application_id: q.application_id,
+    account_ids: q.account_ids && q.account_ids.length > 0 ? q.account_ids.join(',') : undefined,
+    start_date: q.start_date,
+    end_date: q.end_date,
+    type: q.type,
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/v1/chats/export${search}`, { headers });
+  } catch (err) {
+    throw new ApiError(0, 'network_error', 'Koneksi ke server terputus. Coba lagi sebentar lagi.', err);
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(
+      res.status,
+      body.error ?? 'export_failed',
+      body.message ?? `Ekspor gagal (${res.status})`,
+    );
+  }
+
+  const blob = await res.blob();
+  const filename =
+    filenameFrom(res.headers.get('Content-Disposition')) ??
+    `Salesan_Export_Chat_${q.start_date}_${q.end_date}.xlsx`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  // Revoked on the next tick: some browsers start the download asynchronously
+  // and a URL revoked in the same tick can arrive as an empty file.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+
+  const rows = Number(res.headers.get('X-Export-Rows'));
+  return { filename, rows: Number.isFinite(rows) && rows > 0 ? rows : null };
+}
+
 /** Reads the filename the server chose, so the download is not called "export". */
 function filenameFrom(disposition: string | null): string | null {
   if (!disposition) return null;

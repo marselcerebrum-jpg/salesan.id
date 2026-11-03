@@ -77,6 +77,10 @@ func (s *Server) Handler() http.Handler {
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Requested-With"},
 		AllowCredentials: true,
 		MaxAge:           300,
+		// Read by the downloads: the file name the server chose, and how many
+		// rows the chat export holds. Without these the browser hides both
+		// from a page on another origin.
+		ExposedHeaders: []string{"Content-Disposition", "X-Export-Rows"},
 	}))
 
 	r.Get("/health", s.handleHealth)
@@ -227,6 +231,10 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/status/{messageID}/seen", s.handleMarkStatusSeen)
 			// Deleting one of our own Status posts, for everyone.
 			r.Post("/status/{messageID}/revoke", s.handleRevokeStatus)
+
+			// Every message in a period as a spreadsheet, across the numbers
+			// the caller may see. Read-only; scoped inside the handler.
+			r.Get("/chats/export", s.handleExportChats)
 
 			// --- group directory ----------------------------------------
 			//
@@ -445,7 +453,9 @@ func requestTimeout(normal, media time.Duration) func(http.Handler) http.Handler
 				(strings.HasSuffix(r.URL.Path, "/media") ||
 					strings.HasSuffix(r.URL.Path, "/forward") ||
 					strings.Contains(r.URL.Path, "/quick-replies"))) ||
-				(r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/url")) {
+				(r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/url")) ||
+				// A year of messages takes longer to read than two minutes.
+				(r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/chats/export")) {
 				budget = media
 			}
 
