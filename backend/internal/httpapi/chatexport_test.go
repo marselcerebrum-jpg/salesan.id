@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -204,8 +205,7 @@ func TestChatExportRowMatchesHeader(t *testing.T) {
 }
 
 func TestChatExportWorkbook(t *testing.T) {
-	rows := sampleRows()
-	parts := buildWorkbook(t, rows, 0)
+	parts := buildWorkbook(t, sampleRows(), 0)
 
 	for _, want := range []string{"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml",
 		"xl/_rels/workbook.xml.rels", "xl/styles.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"} {
@@ -217,13 +217,13 @@ func TestChatExportWorkbook(t *testing.T) {
 	if !strings.Contains(book, `name="Detail Chat"`) || !strings.Contains(book, `name="Info Ekspor"`) {
 		t.Errorf("sheet names wrong: %s", book)
 	}
-	// 18 named columns: A to R, and no continuation column for short text.
-	if !strings.Contains(book, `&#39;Detail Chat&#39;!$A$1:$R$9`) {
+	// 13 named columns: A to M, and no continuation column for short text.
+	if !strings.Contains(book, `&#39;Detail Chat&#39;!$A$1:$M$9`) {
 		t.Errorf("filter defined name does not cover the rows and columns: %s", book)
 	}
 
 	sheet := parts["xl/worksheets/sheet1.xml"]
-	for _, want := range []string{`state="frozen"`, `ySplit="1"`, `<autoFilter ref="A1:R9"/>`, `width="70"`} {
+	for _, want := range []string{`state="frozen"`, `ySplit="1"`, `<autoFilter ref="A1:M9"/>`, `width="70"`} {
 		if !strings.Contains(sheet, want) {
 			t.Errorf("sheet lacks %s", want)
 		}
@@ -252,18 +252,9 @@ func TestChatExportWorkbook(t *testing.T) {
 		t.Errorf("multi-line text = %q style %s", c.Text, c.Style)
 	}
 
-	// Identity: every id as a text cell, exactly as stored.
-	for i, r := range rows {
-		for name, want := range map[string]string{
-			"ID Pesan":          r.MessageID.String(),
-			"ID Pesan WhatsApp": r.WAMessageID,
-			"ID Akun":           r.AccountID.String(),
-			"ID Percakapan":     r.ConversationID.String(),
-			"JID Percakapan":    r.ChatJID,
-		} {
-			if c := s.cell(i+1, name); c.Text != want || c.Value != "" || c.Style != "4" {
-				t.Errorf("row %d %s = %+v, want text %q", i+1, name, c, want)
-			}
+	for _, gone := range []string{"ID Pesan", "ID Pesan WhatsApp", "ID Akun", "ID Percakapan", "JID Percakapan"} {
+		if _, ok := s.header[gone]; ok {
+			t.Errorf("column %q is still in the sheet", gone)
 		}
 	}
 	if c := s.cell(1, "Status Pesan"); c.Text != "Diterima (delivered)" {
@@ -290,7 +281,7 @@ func TestChatExportWorkbook(t *testing.T) {
 	}
 	// Group member with a number: no customer, the member as author.
 	if s.cell(3, "Nomor Customer").Text != "" || s.cell(3, "Nomor Pengirim").Text != "628124000000" ||
-		s.cell(3, "Jenis Percakapan").Text != "Grup" || s.cell(3, "JID Percakapan").Text != "120363012345@g.us" ||
+		s.cell(3, "Jenis Percakapan").Text != "Grup" ||
 		s.cell(3, "Nama Pengirim").Text != "Andi" {
 		t.Errorf("group member row = %+v", s.rows[3])
 	}
@@ -341,7 +332,8 @@ func TestLongMessageContinuesUnderAHeader(t *testing.T) {
 	parts := buildWorkbook(t, rows, 0)
 	sheet := parts["xl/worksheets/sheet1.xml"]
 
-	// The longest needs three cells, so two continuation columns: S and T.
+	// The longest needs three cells, so two continuation columns, N and O,
+	// right beside the message.
 	s := readSheet(t, sheet)
 	if got := len(s.rows[0]); got != len(chatExportColumns)+2 {
 		t.Fatalf("header has %d columns, want %d", got, len(chatExportColumns)+2)
@@ -351,13 +343,13 @@ func TestLongMessageContinuesUnderAHeader(t *testing.T) {
 			t.Errorf("continuation header %d = %+v", i, c)
 		}
 	}
-	if !strings.Contains(sheet, `<autoFilter ref="A1:T9"/>`) {
+	if !strings.Contains(sheet, `<autoFilter ref="A1:O9"/>`) {
 		t.Error("the filter does not cover the continuation columns")
 	}
-	if !strings.Contains(parts["xl/workbook.xml"], `!$A$1:$T$9`) {
+	if !strings.Contains(parts["xl/workbook.xml"], `!$A$1:$O$9`) {
 		t.Error("the filter defined name does not cover the continuation columns")
 	}
-	if !strings.Contains(sheet, `<col min="19" max="19" width="70" customWidth="1" style="6"/>`) {
+	if !strings.Contains(sheet, `<col min="14" max="14" width="70" customWidth="1" style="6"/>`) {
 		t.Error("continuation columns are not wrapped text at the message width")
 	}
 
@@ -373,10 +365,6 @@ func TestLongMessageContinuesUnderAHeader(t *testing.T) {
 	}
 	if got := whole(3); got != longer {
 		t.Errorf("longer text was altered: %d → %d bytes", len(longer), len(got))
-	}
-	// The named columns keep their place on a long row.
-	if s.cell(1, "ID Pesan").Text != rows[0].MessageID.String() || s.cell(3, "JID Percakapan").Text != rows[2].ChatJID {
-		t.Error("a long message pushed the columns after it")
 	}
 	// Short rows simply leave the continuation columns empty.
 	if s.cell(2, "Keterangan Chat (lanjutan 1)").Text != "" {
@@ -422,6 +410,8 @@ func TestRowsSplitAcrossSheets(t *testing.T) {
 	}
 	for i := range rows {
 		rows[i].MessageID = uuid.New()
+		body := "pesan " + strconv.Itoa(i)
+		rows[i].Body, rows[i].Revoked, rows[i].MessageType = &body, false, "text"
 	}
 	parts := buildWorkbook(t, rows, 10) // 24 rows → 10 + 10 + 4
 
@@ -431,7 +421,7 @@ func TestRowsSplitAcrossSheets(t *testing.T) {
 			t.Errorf("sheet %d is not %q: %s", i+1, name, book)
 		}
 	}
-	for i, want := range []string{"Detail Chat&#39;!$A$1:$R$11", "Detail Chat 2&#39;!$A$1:$R$11", "Detail Chat 3&#39;!$A$1:$R$5"} {
+	for i, want := range []string{"Detail Chat&#39;!$A$1:$M$11", "Detail Chat 2&#39;!$A$1:$M$11", "Detail Chat 3&#39;!$A$1:$M$5"} {
 		if !strings.Contains(book, `localSheetId="`+string(rune('0'+i))+`" hidden="1">&#39;`+want) {
 			t.Errorf("sheet %d filter name missing (%s): %s", i+1, want, book)
 		}
@@ -451,7 +441,7 @@ func TestRowsSplitAcrossSheets(t *testing.T) {
 			t.Errorf("%s holds %d rows, want %d", part, len(s.rows)-1, want)
 		}
 		for r := 1; r < len(s.rows); r++ {
-			seen[s.cell(r, "ID Pesan").Text]++
+			seen[s.cell(r, "Keterangan Chat").Text]++
 		}
 	}
 	if len(seen) != len(rows) {

@@ -46,16 +46,13 @@ var chatExportSlots = make(chan struct{}, 2)
 const chatExportMaxAccounts = 200
 
 // colMessage is "Keterangan Chat", the one column that may continue into
-// continuation columns.
+// continuation columns. It is the last named column, so its continuations sit
+// right beside it.
 const colMessage = 12
 
 // chatExportColumns is the data sheet's header, in order. chatExportCells
 // builds rows in the same order; TestChatExportRowMatchesHeader holds them
 // together.
-//
-// The identity columns come after what a reader looks at: they are there to
-// tell rows apart and to trace one back, not to be read. Every one is text, so
-// an id never turns into a number or a date.
 var chatExportColumns = []sheetColumn{
 	{Header: "Tanggal", Width: 12},
 	{Header: "Jam", Width: 10},
@@ -70,11 +67,6 @@ var chatExportColumns = []sheetColumn{
 	{Header: "Arah Pesan", Width: 12},
 	{Header: "Status Pesan", Width: 20},
 	{Header: "Keterangan Chat", Width: 70},
-	{Header: "ID Pesan", Width: 38},
-	{Header: "ID Pesan WhatsApp", Width: 28},
-	{Header: "ID Akun", Width: 38},
-	{Header: "ID Percakapan", Width: 38},
-	{Header: "JID Percakapan", Width: 32},
 }
 
 // chatExportRequest is the validated filter, plus what the info sheet repeats.
@@ -395,11 +387,6 @@ func chatExportCells(row repository.ChatExportRow) []sheetCell {
 		plain(direction),
 		plain(messageStatusLabel(row.Status)),
 		textCell(text, quoted(text, styleWrap)),
-		plain(row.MessageID.String()),
-		plain(row.WAMessageID),
-		plain(row.AccountID.String()),
-		plain(row.ConversationID.String()),
-		plain(row.ChatJID),
 	}
 }
 
@@ -608,9 +595,8 @@ func chatExportInfo(
 	}
 	info = append(info,
 		[2]string{"Tidak termasuk", excludedSummary(sum.Excluded)},
-		[2]string{"Satu baris", "Satu pesan, dikenali dari ID Pesan, yang muncul sekali dalam file. " +
-			"Pesan grup yang diterima beberapa nomor bisnis tercatat sekali per nomor: " +
-			"ID Pesan WhatsApp dan JID Percakapan sama, ID Akun berbeda."},
+		[2]string{"Satu baris", "Satu pesan, dan setiap pesan muncul sekali. Pesan grup yang diterima " +
+			"beberapa nomor bisnis tercatat sekali per nomor, dengan Akun WhatsApp Bisnis yang berbeda."},
 		[2]string{"Diekspor pada", time.Now().In(analytics.Jakarta).Format("02/01/2006 15:04:05") + " WIB"},
 	)
 	if by != "" {

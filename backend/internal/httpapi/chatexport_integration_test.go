@@ -184,25 +184,19 @@ func TestIntegrationChatExportHandler(t *testing.T) {
 	if _, ok := sheet.header["Keterangan Chat (lanjutan 1)"]; !ok {
 		t.Errorf("no continuation header: %v", sheet.rows[0])
 	}
-	if !strings.Contains(parts["xl/worksheets/sheet1.xml"], `<autoFilter ref="A1:S12"/>`) {
-		t.Error("filter does not cover A:S")
+	if !strings.Contains(parts["xl/worksheets/sheet1.xml"], `<autoFilter ref="A1:N12"/>`) {
+		t.Error("filter does not cover A:N")
 	}
 
-	ids := map[string]bool{}
 	for r := 1; r < len(sheet.rows); r++ {
-		jid := sheet.cell(r, "JID Percakapan").Text
-		for _, out := range []string{"@newsletter", "@bot", "@broadcast"} {
-			if strings.HasSuffix(jid, out) {
-				t.Errorf("row %d is from %s", r, jid)
-			}
+		if name := sheet.cell(r, "Nama Percakapan").Text; name == "Info Promo" || name == "Meta AI" {
+			t.Errorf("row %d is from %s", r, name)
 		}
-		id := sheet.cell(r, "ID Pesan").Text
-		if ids[id] {
-			t.Errorf("ID Pesan %s appears twice", id)
+		if sheet.cell(r, "Keterangan Chat").Text == "bukan chat pelanggan" {
+			t.Errorf("row %d is a channel, bot, broadcast or status message", r)
 		}
-		ids[id] = true
-		if sheet.cell(r, "Status Pesan").Text == "" || sheet.cell(r, "ID Akun").Text == "" {
-			t.Errorf("row %d lacks status or account", r)
+		if sheet.cell(r, "Status Pesan").Text == "" {
+			t.Errorf("row %d lacks a status", r)
 		}
 		if text := sheet.cell(r, "Keterangan Chat").Text; strings.HasPrefix(text, "Rincian paket") {
 			if got := text + sheet.cell(r, "Keterangan Chat (lanjutan 1)").Text; got != long {
