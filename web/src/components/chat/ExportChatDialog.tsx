@@ -27,9 +27,6 @@ const TYPES: { id: ChatExportQuery['type']; label: string }[] = [
   { id: 'group', label: 'Chat Grup' },
 ];
 
-/** The server's bound on one export, repeated so the dialog can say it first. */
-const MAX_DAYS = 366;
-
 /** A calendar date in WIB, as YYYY-MM-DD, whatever zone the browser is in. */
 function wibDate(at: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -40,9 +37,15 @@ function wibDate(at: Date): string {
   }).format(at);
 }
 
-/** Days from a to b, both YYYY-MM-DD. Read as UTC so no zone shifts either. */
-function daysBetween(a: string, b: string): number {
-  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+/**
+ * Whether s is a real calendar date as YYYY-MM-DD. A date input normally
+ * guarantees it, but a typed value can still read 2026-02-30, which Date
+ * would quietly roll into March — so the date is rebuilt and compared.
+ */
+function isCalendarDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const at = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === s;
 }
 
 export interface ExportResult {
@@ -100,9 +103,8 @@ export function ExportChatDialog({
   const today = wibDate(new Date());
   let invalid: string | null = null;
   if (!start || !end) invalid = 'Isi tanggal mulai dan tanggal akhir.';
+  else if (!isCalendarDate(start) || !isCalendarDate(end)) invalid = 'Tanggal tidak valid.';
   else if (start > end) invalid = 'Tanggal mulai tidak boleh melebihi tanggal akhir.';
-  else if (daysBetween(start, end) >= MAX_DAYS)
-    invalid = `Rentang tanggal paling panjang ${MAX_DAYS} hari.`;
 
   function reset() {
     setError(null);

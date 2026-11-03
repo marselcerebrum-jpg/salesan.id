@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -24,12 +25,13 @@ import (
 //
 // Rows go straight into the zip as they are produced, so a sheet of a million
 // messages costs no more memory than a sheet of ten. The parts that depend on
-// the row count (the filter range and its defined name) are written after the
-// sheet, which a zip allows: the order of parts in the archive means nothing.
+// the row count (the filter ranges and their defined names) are written after
+// the sheets, which a zip allows: the order of parts in the archive means nothing.
 
 // excelMaxCellChars is the most a single cell may hold, counted the way Excel
 // counts: in UTF-16 units. A longer value makes the file open with a repair
-// prompt and the text cut, so it is carried over into the next column instead.
+// prompt and the text cut, so the message column carries on into continuation
+// columns instead.
 const excelMaxCellChars = 32767
 
 // excelMaxRows is the sheet's row limit, header included.
@@ -102,32 +104,99 @@ func textCell(s string, style int) sheetCell { return sheetCell{Text: s, Style: 
 type sheetColumn struct {
 	Header string
 	Width  float64
+	// Wrap styles the whole column as wrapped text, for the continuation
+	// columns of a long message.
+	Wrap bool
 }
 
-// styledSheetWriter writes one workbook: a main sheet streamed row by row, and
-// a short key/value sheet describing it.
+// styledSheetWriter writes one workbook: data sheets streamed row by row, each
+// holding as many rows as a sheet can, and a short key/value sheet describing
+// them.
+//
+// One column may run over the cell limit: the message text. Its first piece
+// stays in its own column and the rest go into continuation columns at the
+// end of the row. How many there are is fixed for the whole workbook before
+// the first row, from the length of the longest message, so every sheet has
+// the same columns, each with a header, all inside the filter. A row's pieces
+// sit in that row, so sorting or filtering moves them together.
 type styledSheetWriter struct {
-	zw      *zip.Writer
-	buf     *bufio.Writer
-	name    string
-	columns []sheetColumn
-	rows    int // data rows, header excluded
-	closed  bool
+	zw       *zip.Writer
+	buf      *bufio.Writer
+	name     string
+	columns  []sheetColumn
+	spill    int // the column that continues, or -1
+	named    int // columns before the continuation ones
+	perSheet int // data rows per sheet
+	sheets   []int
+	rows     int // data rows written, across sheets
+	closed   bool
 }
 
-// newStyledSheetWriter opens the archive and writes the header row.
-func newStyledSheetWriter(w io.Writer, name string, columns []sheetColumn) (*styledSheetWriter, error) {
-	zw := zip.NewWriter(w)
-	part, err := zw.Create("xl/worksheets/sheet1.xml")
+// errCellTooLong means a value needed more room than the workbook was laid out
+// for. The summary sizes the continuation columns from the longest message, so
+// this is a bug, and the export fails rather than cut the message.
+var errCellTooLong = errors.New("value does not fit the columns the workbook was laid out with")
+
+// newStyledSheetWriter prepares a workbook whose data sheets have columns. The
+// spill column overflows into the columns from index named on; pass -1 and
+// len(columns) when nothing may overflow.
+func newStyledSheetWriter(w io.Writer, name string, columns []sheetColumn, spill, named int) *styledSheetWriter {
+	return &styledSheetWriter{
+		zw:       zip.NewWriter(w),
+		name:     name,
+		columns:  columns,
+		spill:    spill,
+		named:    named,
+		perSheet: excelMaxRows - 1,
+	}
+}
+
+// continuationColumns is the extra columns a text of at most maxBytes needs,
+// named after the column they continue.
+//
+// Bytes rather than characters: a UTF-8 byte is never fewer than one UTF-16
+// unit, so the count can only err towards one column too many. A piece is
+// counted one unit short of the limit because splitForCell never cuts a
+// surrogate pair, and slack is left for the "[Dokumen] " label in front.
+func continuationColumns(header string, maxBytes int, width float64) []sheetColumn {
+	const labelSlack = 64
+	per := excelMaxCellChars - 1
+	n := (maxBytes + labelSlack + per - 1) / per
+	out := []sheetColumn{}
+	for i := 1; i < n; i++ {
+		out = append(out, sheetColumn{
+			Header: fmt.Sprintf("%s (lanjutan %d)", header, i), Width: width, Wrap: true,
+		})
+	}
+	return out
+}
+
+// Rows is how many data rows have been written so far.
+func (sw *styledSheetWriter) Rows() int { return sw.rows }
+
+// Sheets is how many data sheets the rows took.
+func (sw *styledSheetWriter) Sheets() int { return len(sw.sheets) }
+
+func (sw *styledSheetWriter) sheetName(i int) string {
+	if i == 0 {
+		return sw.name
+	}
+	return fmt.Sprintf("%s %d", sw.name, i+1)
+}
+
+// openSheet starts the next data sheet: its view, widths and header row.
+func (sw *styledSheetWriter) openSheet() error {
+	if sw.buf != nil {
+		if err := sw.closeSheet(); err != nil {
+			return err
+		}
+	}
+	part, err := sw.zw.Create(fmt.Sprintf("xl/worksheets/sheet%d.xml", len(sw.sheets)+1))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	sw := &styledSheetWriter{
-		zw:      zw,
-		buf:     bufio.NewWriterSize(part, 64<<10),
-		name:    name,
-		columns: columns,
-	}
+	sw.buf = bufio.NewWriterSize(part, 64<<10)
+	sw.sheets = append(sw.sheets, 0)
 
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
@@ -139,39 +208,53 @@ func newStyledSheetWriter(w io.Writer, name string, columns []sheetColumn) (*sty
 		`<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>` +
 		`</sheetView></sheetViews>`)
 	b.WriteString(`<cols>`)
-	for i, c := range columns {
-		fmt.Fprintf(&b, `<col min="%d" max="%d" width="%s" customWidth="1"/>`,
-			i+1, i+1, strconv.FormatFloat(c.Width, 'f', -1, 64))
+	for i, c := range sw.columns {
+		style := ""
+		if c.Wrap {
+			style = fmt.Sprintf(` style="%d"`, styleWrap)
+		}
+		fmt.Fprintf(&b, `<col min="%d" max="%d" width="%s" customWidth="1"%s/>`,
+			i+1, i+1, strconv.FormatFloat(c.Width, 'f', -1, 64), style)
 	}
 	b.WriteString(`</cols><sheetData>`)
 	if _, err := sw.buf.WriteString(b.String()); err != nil {
-		return nil, err
+		return err
 	}
 
-	header := make([]sheetCell, len(columns))
-	for i, c := range columns {
+	header := make([]sheetCell, len(sw.columns))
+	for i, c := range sw.columns {
 		header[i] = textCell(c.Header, styleHeader)
 	}
-	if err := sw.writeRow(1, header); err != nil {
-		return nil, err
-	}
-	return sw, nil
+	return sw.writeRow(1, header)
 }
 
-// Rows is how many data rows have been written so far.
-func (sw *styledSheetWriter) Rows() int { return sw.rows }
+// closeSheet ends the current data sheet with a filter over every column,
+// continuation columns included.
+func (sw *styledSheetWriter) closeSheet() error {
+	ref := fmt.Sprintf("A1:%s%d", columnName(len(sw.columns)-1), sw.sheets[len(sw.sheets)-1]+1)
+	if _, err := sw.buf.WriteString(`</sheetData><autoFilter ref="` + ref + `"/></worksheet>`); err != nil {
+		return err
+	}
+	err := sw.buf.Flush()
+	sw.buf = nil
+	return err
+}
 
-// WriteRow appends one data row.
+// WriteRow appends one data row, starting a new sheet when this one is full.
 func (sw *styledSheetWriter) WriteRow(cells []sheetCell) error {
-	if sw.rows+1 >= excelMaxRows {
-		return errSheetFull
+	if sw.buf == nil || sw.sheets[len(sw.sheets)-1] >= sw.perSheet {
+		if err := sw.openSheet(); err != nil {
+			return err
+		}
 	}
+	cur := len(sw.sheets) - 1
+	if err := sw.writeRow(sw.sheets[cur]+2, cells); err != nil {
+		return err
+	}
+	sw.sheets[cur]++
 	sw.rows++
-	return sw.writeRow(sw.rows+1, cells)
+	return nil
 }
-
-// errSheetFull means the next row would be past what a spreadsheet can hold.
-var errSheetFull = fmt.Errorf("sheet is full at %d rows", excelMaxRows)
 
 func (sw *styledSheetWriter) writeRow(index int, cells []sheetCell) error {
 	var b strings.Builder
@@ -186,54 +269,62 @@ func (sw *styledSheetWriter) writeRow(index int, cells []sheetCell) error {
 		b.WriteString(`</t></is></c>`)
 	}
 
-	// A value past the cell limit is not cut. Its first piece stays in its own
-	// column and the rest continue after the last named column, so the columns
-	// to its right keep their place. Continuations are plain text: the quote
-	// marker only matters for what a cell begins with.
-	var overflow []sheetCell
+	// Continuations are plain wrapped text: the quote marker only matters for
+	// what a cell begins with.
+	var overflow []string
 	for col, c := range cells {
 		if c.Num != "" {
 			fmt.Fprintf(&b, `<c r="%s%d" s="%d"><v>%s</v></c>`, columnName(col), index, c.Style, c.Num)
 			continue
 		}
 		pieces := splitForCell(c.Text)
-		text(col, pieces[0], c.Style)
-		for _, p := range pieces[1:] {
-			overflow = append(overflow, textCell(p, unquotedStyle(c.Style)))
+		if len(pieces) > 1 && col != sw.spill {
+			return errCellTooLong
 		}
+		text(col, pieces[0], c.Style)
+		overflow = append(overflow, pieces[1:]...)
 	}
-	for i, c := range overflow {
-		text(len(cells)+i, c.Text, c.Style)
+	if sw.named+len(overflow) > len(sw.columns) {
+		return errCellTooLong
+	}
+	for i, p := range overflow {
+		text(sw.named+i, p, styleWrap)
 	}
 	b.WriteString(`</row>`)
 	_, err := sw.buf.WriteString(b.String())
 	return err
 }
 
-// Close finishes the main sheet, then writes the info sheet and the parts that
-// tie the workbook together. Nothing is usable until this returns nil.
+// Close finishes the last data sheet, then writes the info sheet and the parts
+// that tie the workbook together. Nothing is usable until this returns nil.
 func (sw *styledSheetWriter) Close(infoName string, info [][2]string) error {
 	if sw.closed {
 		return nil
 	}
 	sw.closed = true
 
-	// The filter covers the named columns. Overflow columns, if any, sit to
-	// their right without a header and are not part of it.
-	lastCol := columnName(len(sw.columns) - 1)
-	ref := fmt.Sprintf("A1:%s%d", lastCol, sw.rows+1)
-	if _, err := sw.buf.WriteString(`</sheetData><autoFilter ref="` + ref + `"/></worksheet>`); err != nil {
-		return err
+	if len(sw.sheets) == 0 {
+		// No rows at all still makes a valid workbook: a header and nothing.
+		if err := sw.openSheet(); err != nil {
+			return err
+		}
 	}
-	if err := sw.buf.Flush(); err != nil {
+	if sw.buf != nil {
+		if err := sw.closeSheet(); err != nil {
+			return err
+		}
+	}
+	data := len(sw.sheets)
+	if err := sw.writeInfoSheet(fmt.Sprintf("xl/worksheets/sheet%d.xml", data+1), info); err != nil {
 		return err
 	}
 
-	if err := sw.writeInfoSheet(infoName, info); err != nil {
-		return err
+	all := make([]xlsxSheet, 0, data+1)
+	for i := 0; i < data; i++ {
+		all = append(all, xlsxSheet{Name: sw.sheetName(i)})
 	}
+	names := sheetNames(append(all, xlsxSheet{Name: infoName}))
 
-	names := sheetNames([]xlsxSheet{{Name: sw.name}, {Name: infoName}})
 	put := func(name, body string) error {
 		f, err := sw.zw.Create(name)
 		if err != nil {
@@ -243,13 +334,33 @@ func (sw *styledSheetWriter) Close(infoName string, info [][2]string) error {
 		return err
 	}
 
+	var types, rels, sheets, defined strings.Builder
+	lastCol := columnName(len(sw.columns) - 1)
+	for i := range names {
+		fmt.Fprintf(&types, `<Override PartName="/xl/worksheets/sheet%d.xml" `+
+			`ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`, i+1)
+		fmt.Fprintf(&rels, `<Relationship Id="rId%d" `+
+			`Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" `+
+			`Target="worksheets/sheet%d.xml"/>`, i+1, i+1)
+		fmt.Fprintf(&sheets, `<sheet name="%s" sheetId="%d" r:id="rId%d"/>`, xmlEscape(names[i]), i+1, i+1)
+		if i < data {
+			// Excel records a sheet's filter range under this hidden name as
+			// well, and some versions only show the filter buttons when both
+			// agree.
+			quoted := "'" + strings.ReplaceAll(names[i], "'", "''") + "'"
+			filterRange := fmt.Sprintf("%s!$A$1:$%s$%d", quoted, lastCol, sw.sheets[i]+1)
+			fmt.Fprintf(&defined, `<definedName name="_xlnm._FilterDatabase" localSheetId="%d" hidden="1">%s</definedName>`,
+				i, xmlEscape(filterRange))
+		}
+	}
+	stylesID := len(names) + 1
+
 	if err := put("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`+
 		`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`+
 		`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`+
 		`<Default Extension="xml" ContentType="application/xml"/>`+
 		`<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`+
-		`<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`+
-		`<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`+
+		types.String()+
 		`<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`+
 		`</Types>`); err != nil {
 		return err
@@ -262,39 +373,29 @@ func (sw *styledSheetWriter) Close(infoName string, info [][2]string) error {
 	}
 	if err := put("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`+
 		`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`+
-		`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`+
-		`<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>`+
-		`<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`+
+		rels.String()+
+		fmt.Sprintf(`<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`, stylesID)+
 		`</Relationships>`); err != nil {
 		return err
 	}
 	if err := put("xl/styles.xml", chatExportStyles); err != nil {
 		return err
 	}
-
-	// Excel records a sheet's filter range under this hidden name as well, and
-	// some versions only show the filter buttons when both agree.
-	quoted := "'" + strings.ReplaceAll(names[0], "'", "''") + "'"
-	filterRange := fmt.Sprintf("%s!$A$1:$%s$%d", quoted, lastCol, sw.rows+1)
 	if err := put("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`+
 		`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" `+
 		`xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`+
-		`<sheets>`+
-		`<sheet name="`+xmlEscape(names[0])+`" sheetId="1" r:id="rId1"/>`+
-		`<sheet name="`+xmlEscape(names[1])+`" sheetId="2" r:id="rId2"/>`+
-		`</sheets>`+
-		`<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">`+
-		xmlEscape(filterRange)+`</definedName></definedNames>`+
+		`<sheets>`+sheets.String()+`</sheets>`+
+		`<definedNames>`+defined.String()+`</definedNames>`+
 		`</workbook>`); err != nil {
 		return err
 	}
 	return sw.zw.Close()
 }
 
-// writeInfoSheet is the second tab: which filter produced this file, and how
+// writeInfoSheet is the last tab: which filter produced this file, and how
 // many rows it holds, so a sheet forwarded a week later still explains itself.
-func (sw *styledSheetWriter) writeInfoSheet(name string, info [][2]string) error {
-	part, err := sw.zw.Create("xl/worksheets/sheet2.xml")
+func (sw *styledSheetWriter) writeInfoSheet(path string, info [][2]string) error {
+	part, err := sw.zw.Create(path)
 	if err != nil {
 		return err
 	}
@@ -355,16 +456,6 @@ func quoted(s string, style int) int {
 		return styleTextQuoted
 	case styleWrap:
 		return styleWrapQuoted
-	}
-	return style
-}
-
-func unquotedStyle(style int) int {
-	switch style {
-	case styleTextQuoted:
-		return styleText
-	case styleWrapQuoted:
-		return styleWrap
 	}
 	return style
 }
