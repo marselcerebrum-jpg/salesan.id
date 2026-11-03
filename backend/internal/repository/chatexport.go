@@ -110,6 +110,36 @@ func (r *Repo) ExportChatMessages(
 		return ErrForbidden
 	}
 
+	q, args := chatExportQuery(sc, f)
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var row ChatExportRow
+		if err := rows.Scan(
+			&row.MessageID, &row.Timestamp,
+			&row.ApplicationName, &row.AccountName, &row.AccountPhone,
+			&row.ConversationType, &row.ChatJID,
+			&row.ConversationName, &row.CounterpartPhone,
+			&row.FromMe, &row.MessageType, &row.Body, &row.Caption, &row.Revoked,
+			&row.SenderJID, &row.SenderPhone, &row.SenderName,
+		); err != nil {
+			return err
+		}
+		if err := each(row); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// chatExportQuery builds the export statement and its arguments. Kept apart
+// from the loop so the statement itself can be inspected and planned on its
+// own.
+func chatExportQuery(sc Scope, f ChatExportFilter) (string, []any) {
 	args := []any{sc.WorkspaceID, f.From, f.To}
 	where := []string{
 		"m.workspace_id = $1",
@@ -184,30 +214,7 @@ func (r *Repo) ExportChatMessages(
 		  ) cct on true` + chatExportSender + `
 		 where ` + strings.Join(where, " and ") + `
 		 order by m.timestamp asc, m.created_at asc, m.id asc`
-
-	rows, err := r.pool.Query(ctx, q, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var row ChatExportRow
-		if err := rows.Scan(
-			&row.MessageID, &row.Timestamp,
-			&row.ApplicationName, &row.AccountName, &row.AccountPhone,
-			&row.ConversationType, &row.ChatJID,
-			&row.ConversationName, &row.CounterpartPhone,
-			&row.FromMe, &row.MessageType, &row.Body, &row.Caption, &row.Revoked,
-			&row.SenderJID, &row.SenderPhone, &row.SenderName,
-		); err != nil {
-			return err
-		}
-		if err := each(row); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	return q, args
 }
 
 // ExportAccountOption is one number the export dialog can offer.
