@@ -341,6 +341,13 @@ func (s *Session) repairAndRetryLabelWrite(
 const labelWedgedMessage = "Daftar label di HP nomor ini sedang tidak sinkron, jadi WhatsApp menolak perubahannya. " +
 	"Buka WhatsApp di HP tersebut dan biarkan terhubung sebentar, lalu tekan Sinkron pada nomor ini dan coba lagi."
 
+// wedgedWriteMessage is what a label write on a wedged number answers with.
+//
+// No patch version and no claim about what has been tried: the admin reading it
+// can do one thing, and the sentence says what that is.
+const wedgedWriteMessage = "Label untuk nomor ini sedang bermasalah dari sisi WhatsApp, jadi belum bisa diubah dari salesan. " +
+	"Sementara, ubah label langsung di aplikasi WhatsApp Business di HP. Salesan akan normal kembali dengan sendirinya."
+
 // labelWriteWait bounds how long a write waits for a collection being
 // recovered. Recovery normally completes in two to three seconds; beyond this
 // the operator is better served by a clear failure than a hanging request.
@@ -557,12 +564,10 @@ func (m *Manager) PushChatLabel(
 				// the instruction this account has already disproved, and
 				// routing a wedged number to it would be the third time the same
 				// wrong advice reached somebody from a different place.
-				return offline(fmt.Sprintf(
-					"Label tidak bisa diubah dari salesan untuk nomor ini: data label di WhatsApp "+
-						"sendiri rusak di patch v%d, jadi WhatsApp menolak setiap perubahan. "+
-						"Menekan Sinkron dan memasangkan ulang HP tidak menolong — keduanya sudah "+
-						"dicoba. Ubah labelnya langsung di HP; salesan akan ikut sendiri begitu "+
-						"WhatsApp menyusun ulang datanya.", w.patch)), nil
+				//
+				// Written for the admin at the screen, who needs what to do now
+				// rather than the patch version; that is in the log line above.
+				return offline(wedgedWriteMessage), nil
 			}
 
 			// The collection is out of step rather than the write being wrong.
