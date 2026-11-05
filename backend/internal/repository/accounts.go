@@ -42,10 +42,25 @@ const accountFrom = `
 	        -- clear by reading everything in front of them is not a badge, and
 	        -- it buried the number they actually needed.
 	        and c.type <> 'status'
-	) cv on true
+	) cv on true`
+
+// accountMessageCount counts every message on the number, for the account list.
+//
+// Kept out of GetAccount. That is the permission check in front of every
+// conversation list, label read and status page, called several times a
+// second, and this count walks all of a number's messages each time: on 5 Nov
+// it was 162 calls in 30 seconds costing 55 seconds of database time, enough to
+// starve the store whatsmeow reads sender keys from, so group sends failed with
+// "failed to load sender key ... context deadline exceeded".
+const accountMessageCount = `
 	left join lateral (
 	     select count(*) as n from public.messages m where m.account_id = a.id
 	) ms on true`
+
+// accountNoMessageCount stands in for accountMessageCount where the count is not
+// wanted, so both shapes scan into the same columns.
+const accountNoMessageCount = `
+	left join lateral (select 0::bigint as n) ms on true`
 
 func scanAccount(row interface {
 	Scan(dest ...any) error
@@ -97,7 +112,7 @@ func (r *Repo) ListAccounts(ctx context.Context, sc Scope, f models.AccountFilte
 			len(args), len(args), len(args)))
 	}
 
-	q := "select " + accountColumns + accountFrom +
+	q := "select " + accountColumns + accountFrom + accountMessageCount +
 		" where " + strings.Join(where, " and ") +
 		" order by app.sort_order asc nulls last, a.created_at asc"
 
@@ -123,9 +138,20 @@ func (r *Repo) ListAccountsByApplication(ctx context.Context, sc Scope, applicat
 	return r.ListAccounts(ctx, sc, models.AccountFilter{ApplicationID: &applicationID})
 }
 
-// GetAccount loads one account scoped to the workspace.
+// GetAccount loads one account scoped to the workspace. MessageCount is left at
+// zero; see accountMessageCount, and GetAccountWithMessageCount for the one
+// place that shows it.
 func (r *Repo) GetAccount(ctx context.Context, workspaceID, id uuid.UUID) (*models.Account, error) {
-	q := "select " + accountColumns + accountFrom + " where a.workspace_id = $1 and a.id = $2"
+	return r.getAccount(ctx, workspaceID, id, accountNoMessageCount)
+}
+
+// GetAccountWithMessageCount is GetAccount with MessageCount filled in.
+func (r *Repo) GetAccountWithMessageCount(ctx context.Context, workspaceID, id uuid.UUID) (*models.Account, error) {
+	return r.getAccount(ctx, workspaceID, id, accountMessageCount)
+}
+
+func (r *Repo) getAccount(ctx context.Context, workspaceID, id uuid.UUID, messages string) (*models.Account, error) {
+	q := "select " + accountColumns + accountFrom + messages + " where a.workspace_id = $1 and a.id = $2"
 	acc, err := scanAccount(r.pool.QueryRow(ctx, q, workspaceID, id))
 	if err != nil {
 		return nil, mapErr(err)

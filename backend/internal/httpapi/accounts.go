@@ -72,7 +72,7 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	account, err := s.repo.GetAccount(r.Context(), user.WorkspaceID, id)
+	account, err := s.repo.GetAccountWithMessageCount(r.Context(), user.WorkspaceID, id)
 	if err != nil {
 		writeAppError(w, err)
 		return
