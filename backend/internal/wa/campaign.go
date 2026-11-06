@@ -420,7 +420,7 @@ func (m *Manager) SurfaceChat(ctx context.Context, accountID uuid.UUID, chatJID 
 
 	// Zero timestamp and no message key: whatsmeow documents both as optional,
 	// and the patch only has to say "not archived".
-	return s.client.SendAppState(ctx, appstate.BuildArchive(jid, false, time.Time{}, nil))
+	return s.sendAppState(ctx, appstate.BuildArchive(jid, false, time.Time{}, nil))
 }
 
 // ErrGroupAdminsOnly is WhatsApp refusing a group message with error 420:

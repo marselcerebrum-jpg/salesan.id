@@ -424,7 +424,7 @@ func (m *Manager) PushLabelDefinition(
 	}
 
 	send := func() error {
-		return s.client.SendAppState(ctx, appstate.BuildLabelEdit(waID, name, colorIndex, deleted))
+		return s.sendAppState(ctx, appstate.BuildLabelEdit(waID, name, colorIndex, deleted))
 	}
 	if err := send(); err != nil {
 		// Creating a label is the first write most operators make, so it is
@@ -529,7 +529,7 @@ func (m *Manager) PushChatLabel(
 	// guess. The unused key is an orphan entry in app state and nothing more.
 	for _, jid := range s.labelChatAddresses(ctx, chatJID) {
 		send := func() error {
-			return s.client.SendAppState(ctx, appstate.BuildLabelChat(jid, waID, labeled))
+			return s.sendAppState(ctx, appstate.BuildLabelChat(jid, waID, labeled))
 		}
 
 		err := send()

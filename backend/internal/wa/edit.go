@@ -319,7 +319,7 @@ func (m *Manager) pushDeleteForMe(ctx context.Context, t *repository.MessageTarg
 		}},
 	}
 
-	if err := s.client.SendAppState(ctx, patch); err != nil {
+	if err := s.sendAppState(ctx, patch); err != nil {
 		s.log.Warn("push delete-for-me to phone", "wa_id", t.WAMessageID, "err", err)
 		return false
 	}

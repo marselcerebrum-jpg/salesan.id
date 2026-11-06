@@ -41,6 +41,8 @@ type Session struct {
 	// itself so the gap is measured send-to-send — see beginSend.
 	sendMu     sync.Mutex
 	lastSendAt time.Time
+	// appStateMu serialises writes to WhatsApp's app state; see sendAppState.
+	appStateMu sync.Mutex
 	// presenceSet records that this connection has already announced itself as
 	// available, which WhatsApp needs before it will deliver typing indicators.
 	presenceSet atomic.Bool

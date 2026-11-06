@@ -557,11 +557,16 @@ func (s *Session) requestAppStateRecovery(ctx context.Context, name appstate.WAP
 		// the destructive one, and a collection that was merely stale becomes a
 		// collection with no version at all: unreadable, unwritable, and with
 		// nothing left to put back.
+		//
+		// Under appStateMu, so a write already in flight finishes against the
+		// version it read rather than having it deleted underneath it.
+		s.appStateMu.Lock()
 		if ver, hash, err := s.client.Store.AppState.GetAppStateVersion(ctx, string(name)); err == nil && ver > 0 {
 			s.appStateRollback.Store(string(name), appStateSnapshot{version: ver, hash: hash})
 		}
-
-		if err := s.client.Store.AppState.DeleteAppStateVersion(ctx, string(name)); err != nil {
+		err := s.client.Store.AppState.DeleteAppStateVersion(ctx, string(name))
+		s.appStateMu.Unlock()
+		if err != nil {
 			s.appStateRollback.Delete(string(name))
 			s.markRecovered(name)
 			return false, fmt.Errorf("reset stored version: %w", err)
@@ -1024,4 +1029,27 @@ func (s *Session) forgetWedge(ctx context.Context, name appstate.WAPatchName) {
 	if err := s.mgr.repo.ClearLabelWedge(ctx, s.AccountID); err != nil {
 		s.log.Warn("could not clear the recorded label wedge", "patch", name, "err", err)
 	}
+}
+
+// sendAppState writes one patch to WhatsApp's app state, one at a time per
+// number.
+//
+// whatsmeow's SendAppState is not safe to run twice at once on one client. It
+// reads the stored version without a lock, and when WhatsApp answers 409 it
+// applies the conflicting patches outside the lock its own sync takes. Two
+// writes in flight together therefore apply the same patch to the stored state
+// twice, the stored LTHash stops matching WhatsApp's, and every later write is
+// refused until the collection is re-read.
+//
+// That is what an admin clicking a second label before the first finished did,
+// and it is what turned "kadang bisa, kadang gagal" into a number stuck behind
+// "Label sedang disinkronkan": on 6 Nov, Admin prajurit utama removed one label
+// at 07:19:44 and added another at 07:19:46, both in flight together, and the
+// collection failed verification at 07:19:47. A label toggle is two writes (one
+// per address) and read state, archive and delete-for-me write here too, so one
+// lock covers every patch rather than one per feature.
+func (s *Session) sendAppState(ctx context.Context, patch appstate.PatchInfo) error {
+	s.appStateMu.Lock()
+	defer s.appStateMu.Unlock()
+	return s.client.SendAppState(ctx, patch)
 }

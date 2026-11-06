@@ -56,7 +56,7 @@ func (m *Manager) SetChatReadState(
 	}
 
 	patch := appstate.BuildMarkChatAsRead(chatJID, read, anchor.Timestamp, messageKey(anchor, chatJID))
-	if err := s.client.SendAppState(ctx, patch); err != nil {
+	if err := s.sendAppState(ctx, patch); err != nil {
 		s.log.Warn("push read state to phone", "chat", anchor.ChatJID, "read", read, "err", err)
 		return &ReadStatePush{Reason: "WhatsApp menolak perubahan: " + err.Error()}, nil
 	}
@@ -128,7 +128,7 @@ func (m *Manager) SetChatArchived(
 		}
 
 		patch := appstate.BuildArchive(chatJID, archived, anchor.Timestamp, messageKey(anchor, chatJID))
-		if err := s.client.SendAppState(ctx, patch); err != nil {
+		if err := s.sendAppState(ctx, patch); err != nil {
 			s.log.Warn("push archive to phone", "chat", anchor.ChatJID, "archived", archived, "err", err)
 			out.Reason = "WhatsApp menolak perubahan: " + err.Error()
 		} else {
