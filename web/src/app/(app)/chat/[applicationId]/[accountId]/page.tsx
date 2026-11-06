@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 
 import {
@@ -98,6 +98,23 @@ import type {
  * on that phone and press Sinkron. The backend knows that and says so; without
  * carrying it here the sentence is written and never read.
  */
+/**
+ * The sentence an admin reads when a background label sync fails.
+ *
+ * The backend's own sentences are kept: they are written for this screen. What
+ * is replaced is a raw Go error passed through as the detail — "context
+ * deadline exceeded" told a team labelling chats nothing, and read as though
+ * the label they had just set was the thing that broke.
+ */
+function labelSyncMessage(detail: string | null | undefined): string {
+  const fallback =
+    'Label belum bisa dibaca ulang dari WhatsApp. Label yang tampil tetap bisa dipakai; salesan akan mencoba lagi otomatis.';
+  if (!detail) return fallback;
+  const technical =
+    /context (deadline exceeded|canceled)|failed to |timeout|connection refused|EOF|<error|\bpatch v\d+/i;
+  return technical.test(detail) ? fallback : detail;
+}
+
 function LabelSyncBadge({ state, detail }: { state: LabelSyncState; detail?: string | null }) {
   if (state === 'idle') return null;
 
@@ -113,7 +130,7 @@ function LabelSyncBadge({ state, detail }: { state: LabelSyncState; detail?: str
 
   return (
     <span
-      title={state !== 'synced' && detail ? detail : undefined}
+      title={state !== 'synced' && detail ? labelSyncMessage(detail) : undefined}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-2xs font-medium ${tone.className}`}
     >
       {state === 'syncing' ? (
@@ -230,6 +247,9 @@ function Inbox() {
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [labelSync, setLabelSync] = useState<LabelSyncState>('idle');
   const [labelSyncDetail, setLabelSyncDetail] = useState<string | null>(null);
+  // The banner text a failed label sync put up, so a later successful sync can
+  // take down that one and not an unrelated error.
+  const labelSyncError = useRef<string | null>(null);
   const confirm = useConfirm();
   // Where the "N pesan belum dibaca" divider sits, captured when the thread is
   // opened and held until another thread is opened — as WhatsApp does.
@@ -596,7 +616,19 @@ function Inbox() {
     if (payload.account_id !== accountId) return;
     setLabelSync(payload.state);
     setLabelSyncDetail(payload.detail ?? null);
-    if (payload.state === 'failed' && payload.detail) setError(payload.detail);
+    if (payload.state === 'failed' && payload.detail) {
+      const message = labelSyncMessage(payload.detail);
+      labelSyncError.current = message;
+      setError(message);
+    } else if (payload.state === 'synced' && labelSyncError.current) {
+      // The failure this banner reported is over, so the banner goes with it.
+      // It used to stay until a refresh, sitting above a green "Label
+      // tersinkron" and blamed on whatever label was set next. Only the
+      // sync's own message is cleared; an error from something else stays.
+      const stale = labelSyncError.current;
+      labelSyncError.current = null;
+      setError((current) => (current === stale ? null : current));
+    }
   });
 
   /* --- actions ------------------------------------------------------------ */
