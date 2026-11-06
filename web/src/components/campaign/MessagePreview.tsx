@@ -109,6 +109,7 @@ export function MessagePreview({
             ) : mediaKind === 'image' && url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
+                key={url}
                 src={url}
                 alt=""
                 onError={() => setBrokenURL(url)}
@@ -122,7 +123,15 @@ export function MessagePreview({
               //
               // preload="metadata" so a 60 MB file is not pulled down in full
               // just to draw a first frame.
+              //
+              // Keyed by URL, as the image is. Typing a link changes src on every
+              // keystroke, and a half-typed one (".../cbed9f.mp") fails a moment
+              // later, by which time onError closes over the finished link, so
+              // a link that plays was marked broken and never tried again. A new
+              // element per URL leaves that late error on one React no longer
+              // listens to.
               <video
+                key={url}
                 src={url}
                 controls
                 muted

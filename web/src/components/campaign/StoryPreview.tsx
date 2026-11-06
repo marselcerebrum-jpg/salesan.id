@@ -140,8 +140,12 @@ export function StoryPreview({
             // object-contain, not cover. A Story is letterboxed by WhatsApp when
             // the picture is not 9:16, and cropping it here would hide exactly
             // the part the author needs to see is going to be cut.
+            //
+            // Keyed by URL so a half-typed link's late error cannot land on the
+            // finished one; see MessagePreview.
             // eslint-disable-next-line @next/next/no-img-element
             <img
+              key={url}
               src={url}
               alt=""
               onError={() => setRetryAsVideo(url)}
@@ -149,6 +153,7 @@ export function StoryPreview({
             />
           ) : shown === 'video' && url ? (
             <video
+              key={url}
               src={url}
               controls
               muted
