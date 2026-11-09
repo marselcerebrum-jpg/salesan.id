@@ -32,7 +32,7 @@ import {
   type AnalyticsQuery,
   type ActivityPage,
 } from '@/lib/api';
-import { useRealtimeEvent } from '@/lib/realtime';
+import { useRealtimeRefresh } from '@/lib/realtime';
 import type { ActivityRow } from '@/lib/types';
 
 /**
@@ -172,8 +172,7 @@ export function ActivityHistory({
     void load({}, true, controller.signal);
   }, [load]);
 
-  useRealtimeEvent('metrics.updated', refreshTop);
-  useRealtimeEvent('campaign.updated', refreshTop);
+  useRealtimeRefresh(['metrics.updated', 'campaign.updated'], refreshTop);
 
   const rows = pages.flat();
 

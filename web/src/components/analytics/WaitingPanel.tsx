@@ -14,7 +14,7 @@ import {
   formatTime,
 } from '@/components/analytics/Primitives';
 import { ApiError, analyticsPath, fetcher, locateConversation, type AnalyticsQuery } from '@/lib/api';
-import { useRealtimeEvent } from '@/lib/realtime';
+import { useRealtimeRefresh } from '@/lib/realtime';
 import type { SLACycleRow } from '@/lib/types';
 
 /**
@@ -53,9 +53,15 @@ export function WaitingPanel({
 
   // A reply closes the cycle server-side; this is what makes the row disappear
   // without anybody pressing refresh.
-  useRealtimeEvent('metrics.updated', () => {
-    if (open) void mutate();
-  });
+  // Ten seconds rather than the default thirty: this is a list somebody opened
+  // to work through, and a row that lingers after its reply reads as undone.
+  useRealtimeRefresh(
+    'metrics.updated',
+    () => {
+      if (open) void mutate();
+    },
+    10_000,
+  );
 
   useEffect(() => {
     if (!open) return;

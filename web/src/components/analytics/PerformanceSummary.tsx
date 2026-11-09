@@ -20,7 +20,7 @@ import {
   type AnalyticsQuery,
   type LabelCategoryResponse,
 } from '@/lib/api';
-import { useRealtimeEvent } from '@/lib/realtime';
+import { useRealtimeRefresh } from '@/lib/realtime';
 import type { AnalyticsScope, PerformanceReport } from '@/lib/types';
 
 /**
@@ -130,12 +130,11 @@ export function PerformanceSummary({
    */
   const multiDay = !query.date || Boolean(query.from || query.to || query.month);
 
-  useRealtimeEvent('metrics.updated', () => {
+  useRealtimeRefresh('metrics.updated', () => {
     void mutate();
     void labelCategories.mutate();
   });
-  useRealtimeEvent('campaign.updated', () => void mutate());
-  useRealtimeEvent('schedule.updated', () => void mutate());
+  useRealtimeRefresh(['campaign.updated', 'schedule.updated'], () => void mutate());
 
   const report = data?.report;
   const s = report?.summary;

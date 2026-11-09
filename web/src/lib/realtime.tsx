@@ -216,3 +216,48 @@ export function useRealtimeEvent<T = unknown>(
     });
   }, [key, subscribe]);
 }
+
+/**
+ * Runs `refresh` when events of the given types arrive, at most once per
+ * `minIntervalMs`.
+ *
+ * For views that re-query an aggregate on every event. `metrics.updated` fires
+ * for each message on every number in the workspace, several times a second in
+ * working hours, and each one used to re-run the dashboard's queries: on 9 Nov
+ * one office had the activity feed fetched 117 times in two minutes, at about
+ * 1.4 seconds of database time apiece, and sending a chat message queued behind
+ * it. A burst now costs one refresh as soon as the interval allows and one more
+ * at its end, so the last event is never left unshown.
+ */
+export function useRealtimeRefresh(
+  types: RealtimeEventType | RealtimeEventType[],
+  refresh: () => void,
+  minIntervalMs = 30_000,
+) {
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const lastRun = useRef(0);
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (pending.current) clearTimeout(pending.current);
+    },
+    [],
+  );
+
+  useRealtimeEvent(types, () => {
+    if (pending.current) return;
+    const wait = lastRun.current + minIntervalMs - Date.now();
+    if (wait <= 0) {
+      lastRun.current = Date.now();
+      refreshRef.current();
+      return;
+    }
+    pending.current = setTimeout(() => {
+      pending.current = null;
+      lastRun.current = Date.now();
+      refreshRef.current();
+    }, wait);
+  });
+}
