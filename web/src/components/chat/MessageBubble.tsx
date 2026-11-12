@@ -28,6 +28,7 @@ import { MessageMenu, type MessageAction } from '@/components/chat/MessageMenu';
 import { PollBubble } from '@/components/chat/PollBubble';
 import { ReactionButton, ReactionChips, ReactionPicker } from '@/components/chat/Reactions';
 import { MESSAGE_STATUS_LABEL, formatMessageTime } from '@/lib/format';
+import { sendErrorMessage } from '@/lib/sendError';
 import type { Attachment, Message, MessageType, QuotedMessage } from '@/lib/types';
 
 const MEDIA_ICON: Partial<Record<MessageType, ComponentType<{ className?: string }>>> = {
@@ -353,7 +354,9 @@ export function MessageBubble({
         ) : null}
 
         {message.status === 'failed' && message.error_message ? (
-          <p className="mt-1 text-2xs text-danger">Gagal: {message.error_message}</p>
+          <p className="mt-1 text-2xs text-danger" title={message.error_message}>
+            Gagal: {sendErrorMessage(message.error_message)}
+          </p>
         ) : null}
 
         {/* Uncaptioned media has no text line for the stamp to float into, so
