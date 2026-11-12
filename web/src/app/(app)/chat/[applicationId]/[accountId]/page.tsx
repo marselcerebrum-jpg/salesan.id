@@ -64,6 +64,7 @@ import {
 } from '@/lib/api';
 import { ACCOUNT_STATUS_LABEL, accountStatusTone, conversationTitle } from '@/lib/format';
 import { usePresenceAnnounce, useRealtimeEvent } from '@/lib/realtime';
+import { sendErrorMessage } from '@/lib/sendError';
 import type {
   Account,
   Conversation,
@@ -646,7 +647,7 @@ function Inbox() {
       );
       void mutateList();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Pesan gagal dikirim.');
+      setError(err instanceof Error ? sendErrorMessage(err.message) : 'Pesan gagal dikirim.');
       if (selected) void loadMessages(selected.id);
     } finally {
       setSending(false);

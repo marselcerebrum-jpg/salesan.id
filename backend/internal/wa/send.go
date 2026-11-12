@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -111,25 +112,155 @@ func (m *Manager) SendText(
 		}}
 	}
 
-	resp, sendErr := s.client.SendMessage(ctx, chatJID, payload,
+	resp, sendErr := s.client.SendMessage(ctx, chatJID, proto.Clone(payload).(*waE2E.Message),
 		whatsmeow.SendRequestExtra{ID: msgID})
 
 	if sendErr != nil {
-		detail := sendErr.Error()
-		failed, err := m.repo.SetMessageOutcome(ctx, msg.ID, models.MessageStatusFailed, nil, &detail)
-		if err != nil {
-			s.log.Error("record send failure", "err", err)
-		} else {
-			msg = failed
+		if transientSendError(sendErr) {
+			// Left pending and sent again in the background; see retryText.
+			s.log.Warn("send hit a passing fault; retrying in the background",
+				"message_id", msg.ID, "err", sendErr)
+			go m.retryText(workspaceID, conv, msg.ID, chatJID, payload, msgID, sendErr)
+			return msg, nil
 		}
-		m.broadcastMessageStatus(workspaceID, conv.AccountID, conv.ID, msg)
-		return msg, fmt.Errorf("send message: %w", sendErr)
+		return m.finishFailed(ctx, workspaceID, conv, msg, sendErr), fmt.Errorf("send message: %w", sendErr)
 	}
+	return m.finishSent(ctx, workspaceID, conv, msg, resp.Timestamp), nil
+}
 
-	sentAt := resp.Timestamp
+// sendRetryWaits is the pause before each background retry of a text message
+// that failed on a passing fault: about eight minutes in all, which outlasts
+// the three-to-four minute drops seen on 12 Nov and stops well short of a reply
+// arriving so late it reads as out of place.
+var sendRetryWaits = []time.Duration{
+	15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute,
+}
+
+// transientSendError reports whether a failed send is worth trying again
+// unchanged.
+//
+// Timeouts and dropped connections are: on 12 Nov four numbers lost WhatsApp
+// for three minutes and a reply sent in that window failed with "info query
+// timed out", although the same send a minute later would have gone through.
+// A refusal is not — a blocked recipient, an unknown number, a group this
+// number has left — and retrying those only delays the error the admin needs.
+func transientSendError(err error) bool {
+	var disconnected *whatsmeow.DisconnectedError
+	if errors.Is(err, whatsmeow.ErrIQTimedOut) ||
+		errors.Is(err, whatsmeow.ErrNotConnected) ||
+		errors.As(err, &disconnected) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return true
+	}
+	// Some of these arrive flattened into a string by whatsmeow or the
+	// database driver, so the sentinels above cannot see them.
+	text := err.Error()
+	return strings.Contains(text, "deadline exceeded") ||
+		strings.Contains(text, "timed out") ||
+		strings.Contains(text, "bad connection")
+}
+
+// retryText sends a text message again after a passing fault.
+//
+// The same WhatsApp message ID every time, so a first attempt that did reach
+// WhatsApp before its answer was lost is not delivered as a second message.
+// The row stays pending throughout; the admin sees a clock rather than an
+// error, and only a fault that outlasts every retry, or one that turns out to
+// be a refusal, is recorded as a failure.
+func (m *Manager) retryText(
+	workspaceID uuid.UUID,
+	conv *models.Conversation,
+	messageID uuid.UUID,
+	chatJID types.JID,
+	payload *waE2E.Message,
+	msgID types.MessageID,
+	lastErr error,
+) {
+	for _, wait := range sendRetryWaits {
+		select {
+		case <-m.rootCtx.Done():
+			// Shutting down: a pending row nobody will finish would show a
+			// clock forever, so it is closed as failed instead.
+			m.failRetry(workspaceID, conv, messageID, lastErr)
+			return
+		case <-time.After(wait):
+		}
+
+		s, ok := m.Session(conv.AccountID)
+		if !ok || !s.IsConnected() {
+			lastErr = ErrNotConnected
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(m.rootCtx, time.Minute)
+		s.sendMu.Lock()
+		resp, err := s.client.SendMessage(ctx, chatJID, proto.Clone(payload).(*waE2E.Message),
+			whatsmeow.SendRequestExtra{ID: msgID})
+		s.lastSendAt = time.Now()
+		s.sendMu.Unlock()
+
+		if err == nil {
+			if msg, getErr := m.repo.GetMessageByID(ctx, workspaceID, messageID); getErr == nil {
+				m.finishSent(ctx, workspaceID, conv, msg, resp.Timestamp)
+			}
+			cancel()
+			s.log.Info("message sent on retry", "message_id", messageID)
+			return
+		}
+		cancel()
+		lastErr = err
+		s.log.Warn("send retry failed", "message_id", messageID, "err", err)
+		if !transientSendError(err) {
+			break
+		}
+	}
+	m.failRetry(workspaceID, conv, messageID, lastErr)
+}
+
+// failRetry records a background retry's final failure.
+func (m *Manager) failRetry(workspaceID uuid.UUID, conv *models.Conversation, messageID uuid.UUID, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	msg, getErr := m.repo.GetMessageByID(ctx, workspaceID, messageID)
+	if getErr != nil {
+		m.log.Error("record send failure after retries", "message_id", messageID, "err", getErr)
+		return
+	}
+	m.finishFailed(ctx, workspaceID, conv, msg, err)
+}
+
+// finishFailed moves an outgoing message to failed and tells the browser.
+func (m *Manager) finishFailed(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	conv *models.Conversation,
+	msg *models.Message,
+	sendErr error,
+) *models.Message {
+	detail := sendErr.Error()
+	failed, err := m.repo.SetMessageOutcome(ctx, msg.ID, models.MessageStatusFailed, nil, &detail)
+	if err != nil {
+		m.log.Error("record send failure", "account_id", conv.AccountID, "err", err)
+	} else {
+		msg = failed
+	}
+	m.broadcastMessageStatus(workspaceID, conv.AccountID, conv.ID, msg)
+	return msg
+}
+
+// finishSent moves an outgoing message to sent and brings everything that
+// depends on it up to date.
+func (m *Manager) finishSent(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	conv *models.Conversation,
+	msg *models.Message,
+	sentAt time.Time,
+) *models.Message {
 	updated, err := m.repo.SetMessageOutcome(ctx, msg.ID, models.MessageStatusSent, &sentAt, nil)
 	if err != nil {
-		return msg, nil // it went out; the receipt handler will correct the row
+		return msg // it went out; the receipt handler will correct the row
 	}
 	// SetMessageOutcome returns the bare row. Re-reading it brings back the
 	// quote preview, which the browser needs to draw the reply properly the
@@ -145,7 +276,7 @@ func (m *Manager) SendText(
 	// A manual reply is what closes an SLA cycle and what a follow-up is made
 	// of, so the report has to be rebuilt here as well as on the way in.
 	m.RefreshConversationMetrics(ctx, workspaceID, conv.ID)
-	return updated, nil
+	return updated
 }
 
 func (m *Manager) broadcastMessageStatus(workspaceID, accountID, conversationID uuid.UUID, msg *models.Message) {
